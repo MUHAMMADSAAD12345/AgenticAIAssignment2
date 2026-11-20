@@ -292,8 +292,45 @@ def test_relocation_rules():
     print('[PASS] relocation policy (scout / wait / follow) and validator rules (depleted, adjacency, mission cap)')
 
 
+def test_sell_and_list_rules():
+    """Live state after run 5: B at Haven with crystals and a station bid; A at belt-less Market Prime."""
+    from mas.policy import fallback_plan, mission_reserve, sale_value, listing_choice
+    stats = {'credits_earned': 24, 'credits_spent': 0, 'ore_mined': 62, 'trades_completed': 2,
+             'exchange_items_sold': 3, 'distance_traveled': 600, 'systems_explored': 1}
+    market_mission = {'id': 'mk', 'title': 'Market Participation: Selling', 'type': 'trading', 'description': '',
+                      'objectives': [{'item_id': None, 'quantity': 10, 'current': 0,
+                                      'description': 'Sell 10 units of any item on the exchange'}]}
+    copper_mission = {'id': 'cu', 'title': 'Copper Requisition', 'type': 'mining', 'description': '',
+                      'objectives': [{'item_id': 'copper_ore', 'quantity': 25, 'current': 0,
+                                      'description': 'Mine 25 units of Copper Ore'}]}
+
+    def pilot(system, cargo, market, belts_ok):
+        return {'status': {'system': system, 'docked': True, 'cargo': cargo, 'cargo_used': sum(cargo.values()),
+                           'cargo_capacity': 110, 'cargo_free': 110 - sum(cargo.values()), 'credits': 250,
+                           'fuel_frac': 0.9, 'hull_frac': 1.0, 'stats': dict(stats)},
+                'belts': [{'id': 'b'}] if belts_ok else [], 'belts_ok': [{'id': 'b'}] if belts_ok else [],
+                'connections': [], 'active_missions': [copper_mission, market_mission], 'available_missions': [],
+                'market': market, 'system_yield': {}, 'exhausted_systems': []}
+    B = pilot('haven', {'copper_ore': 15, 'trade_crystal': 14},
+              {'trade_crystal': {'bid': 272, 'bid_qty': 7, 'ask': 275}, 'copper_ore': {'bid': None, 'ask': 4}}, True)
+    A = pilot('market_prime', {'copper_ore': 5, 'trade_crystal': 4},
+              {'trade_crystal': {'bid': None, 'ask': 430}, 'copper_ore': {'bid': 4, 'bid_qty': 35, 'ask': 17}}, False)
+    assert mission_reserve(B) == {'copper_ore': 25} and mission_reserve(A) == {}   # A cannot mine there
+    assert sale_value(B) == 7 * 272                                                 # only 7 units have a buyer
+    assert listing_choice(A) == {'item_id': 'trade_crystal', 'quantity': 4, 'price_each': 429}
+    plan = fallback_plan({'A': A, 'B': B}, combined_progress({'A': A, 'B': B}, CFG), CFG, [])
+    skills = {a['pilot']: (a['skill'], a['params']) for a in plan['assignments']}
+    assert skills['B'][0] == 'sell_and_complete' and skills['B'][1]['reserve'] == {'copper_ore': 25}, skills
+    # A: copper sells instantly for only 5*4=20 cr (< 50), so it lists the valuable crystals instead
+    assert skills['A'] == ('list_item', {'item_id': 'trade_crystal', 'quantity': 4, 'price_each': 429}), skills
+    clean, _ = validate_plan(plan, {'A': A, 'B': B}, CFG, combined_progress({'A': A, 'B': B}, CFG))
+    assert {c['pilot']: c['skill'] for c in clean} == {'A': 'list_item', 'B': 'sell_and_complete'}
+    print('[PASS] value-triggered selling, mission reserve, and market-mission listing rules')
+
+
 def main():
     test_schema_validation()
+    test_sell_and_list_rules()
     test_relocation_rules()
     test_parsers()
     test_live_text_formats()

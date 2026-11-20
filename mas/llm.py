@@ -28,6 +28,8 @@ Belts: a pilot can only mine where belts_ok is non-empty. If belts_ok is empty, 
 follow the other pilot to a system whose system_yield > 0, or (if no system is proven) send ONE pilot to scout
 the nearest neighbour not in exhausted_systems while the other waits. Each jump adds its distance to
 distance_traveled, so stay within allowances.distance_left. accept_mission needs mission_slots_free > 0.
+Selling: if sale_value_now >= 50, sell_and_complete earns those credits now (station/player buy orders).
+If market_mission_units_needed > 0 and nothing sells instantly, list_item surplus just under the lowest ask.
 Use only fresh facts given. Reply with ONLY a JSON object:
 {"rationale":"<=40 words","assignments":[{"pilot":"A","skill":"...","params":{...}}]}"""
 

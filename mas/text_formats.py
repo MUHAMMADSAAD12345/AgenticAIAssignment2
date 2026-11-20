@@ -178,7 +178,8 @@ def missions(text: str) -> list[dict]:
                 m = _OBJ_ITEM.search(line)
                 objectives.append({
                     'item_id': slug(m.group(2)) if m else None,
-                    'quantity': _int(m.group(1), 0) if m else (_int(prog.group(2), 0) if prog else 0),
+                    'quantity': _int(m.group(1), 0) if m else (_int(prog.group(2), 0) if prog else
+                                                              _int(line, 0)),  # e.g. 'Sell 10 units of any item'
                     'current': _int(prog.group(1), 0) if prog else 0,
                     'type': 'deliver' if m else None, 'description': line})
         pct = re.search(r'(\d+)\s*%\s*(?:complete|done)', body, re.I)

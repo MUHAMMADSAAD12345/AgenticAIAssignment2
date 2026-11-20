@@ -1,5 +1,6 @@
 """Plan schema, validation and the deterministic fallback policy used by the coordinator."""
 from __future__ import annotations
+import re
 from mas import game_state as gsx
 
 SKILL_AGENT = {
@@ -83,6 +84,66 @@ def relocation_target(pilot: str, obs: dict, o: dict, al: dict, scouting: set) -
     return None, 'no affordable neighbour left within the distance budget'
 
 
+def mission_reserve(o: dict) -> dict[str, int]:
+    """Cargo that active missions still need. Mining missions only reserve ore where they can progress
+    (a usable belt here); otherwise the ore is ordinary surplus (e.g. a pilot parked at belt-less Market Prime)."""
+    can_mine = 'belts_ok' not in o or bool(o['belts_ok'])
+    reserve: dict[str, int] = {}
+    for m in o.get('active_missions') or []:
+        if gsx.mission_kind(m) == 'mining' and not can_mine:
+            continue
+        for ob in m.get('objectives') or []:
+            if ob.get('item_id') and ob.get('quantity'):
+                left = int(ob['quantity'] - (ob.get('current') or 0))
+                if left > 0:
+                    reserve[ob['item_id']] = reserve.get(ob['item_id'], 0) + left
+    return reserve
+
+
+def surplus(o: dict) -> dict[str, int]:
+    st, reserve = o['status'], mission_reserve(o)
+    return {k: q - reserve.get(k, 0) for k, q in (st.get('cargo') or {}).items()
+            if not k.startswith('fuel') and q - reserve.get(k, 0) > 0}
+
+
+def sale_value(o: dict) -> float:
+    """Credits the surplus would fetch right now from existing buy orders at this station."""
+    market, total = o.get('market') or {}, 0.0
+    for item, qty in surplus(o).items():
+        m = market.get(item) or {}
+        if m.get('bid'):
+            total += min(qty, m.get('bid_qty') or qty) * m['bid']
+    return total
+
+
+def market_mission_need(o: dict) -> int:
+    """Units still to sell for active 'sell N units on the exchange' missions."""
+    need = 0
+    for m in o.get('active_missions') or []:
+        if gsx.mission_kind(m) == 'market':
+            for ob in m.get('objectives') or []:
+                if re.search(r'\bsell\b', str(ob.get('description') or ''), re.I):
+                    need += max(0, int((ob.get('quantity') or 0) - (ob.get('current') or 0)))
+    return need
+
+
+def listing_choice(o: dict) -> dict | None:
+    """Surplus item with no buyers here, listed just under the lowest ask (largest expected value first)."""
+    market, need = o.get('market') or {}, market_mission_need(o)
+    if need <= 0:
+        return None
+    best = None
+    for item, qty in surplus(o).items():
+        m = market.get(item) or {}
+        if m.get('bid'):
+            continue  # sells instantly via sell_and_complete instead
+        price = int(m['ask']) - 1 if m.get('ask') and m['ask'] > 1 else None
+        value = (price or 1) * min(qty, need)
+        if best is None or value > best[0]:
+            best = (value, {'item_id': item, 'quantity': int(min(qty, need)), 'price_each': price})
+    return best[1] if best else None
+
+
 def fallback_plan(obs: dict[str, dict], progress: dict, cfg: dict, history: list[dict]) -> dict:
     """Rule-based policy: used when the LLM is unavailable/over budget or returns an invalid plan."""
     al = allowances(progress, cfg)
@@ -105,9 +166,22 @@ def fallback_plan(obs: dict[str, dict], progress: dict, cfg: dict, history: list
                 assignments.append({'pilot': pilot, 'skill': 'sell_and_complete', 'params': {}})
                 reasons.append(f'{pilot}: distance budget spent, only selling docked cargo')
             continue
-        if st['docked'] and (st['cargo'] and any(not k.startswith('fuel') for k in st['cargo'])) and \
+        value = sale_value(o) if st['docked'] else 0
+        listing = listing_choice(o) if st['docked'] else None
+        listed_recently = any(h['skill'] == 'list_item' and h['pilot'] == pilot and h['status'] == 'completed'
+                              for h in history[:12])
+        if st['docked'] and value >= 50:
+            # buyers here would pay real credits for surplus cargo right now (e.g. a station order for crystals)
+            assignments.append({'pilot': pilot, 'skill': 'sell_and_complete',
+                                'params': {'reserve': mission_reserve(o)}})
+            reasons.append(f'{pilot}: buy orders here worth ~{int(value)} cr for surplus cargo -> sell now')
+        elif listing and not listed_recently:
+            assignments.append({'pilot': pilot, 'skill': 'list_item', 'params': listing})
+            reasons.append(f'{pilot}: market mission needs sales; no buyers for {listing["item_id"]} here -> '
+                           f'list {listing["quantity"]} @ {listing["price_each"] or "auto"} (just under lowest ask)')
+        elif st['docked'] and (st['cargo'] and any(not k.startswith('fuel') for k in st['cargo'])) and \
                 (cargo_frac >= 0.5 or not active or any(_satisfied(m, st) for m in active)):
-            assignments.append({'pilot': pilot, 'skill': 'sell_and_complete', 'params': {}})
+            assignments.append({'pilot': pilot, 'skill': 'sell_and_complete', 'params': {'reserve': mission_reserve(o)}})
             reasons.append(f'{pilot}: docked with cargo -> complete missions / sell')
         elif 'belts_ok' in o and not o['belts_ok'] and any(not k.startswith('fuel') for k in st['cargo']) and \
                 not any(h['skill'] == 'sell_and_complete' and h['pilot'] == pilot for h in history[:2]):
@@ -219,6 +293,10 @@ def validate_plan(plan: dict, obs: dict, cfg: dict, progress: dict) -> tuple[lis
             if st['cargo_capacity'] and st['cargo_free'] <= 0:
                 problems.append(f'{pilot} cargo full: mining replaced by sell_and_complete')
                 skill, params = 'sell_and_complete', {}
+        if skill == 'sell_and_complete' and 'reserve' in params:
+            res = params['reserve'] if isinstance(params['reserve'], dict) else {}
+            params['reserve'] = {str(k): int(v) for k, v in res.items()
+                                 if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0}
         if skill == 'list_item':
             if st['cargo'].get(params.get('item_id'), 0) < int(params.get('quantity', 1)):
                 problems.append('list_item rejected: item not in cargo')

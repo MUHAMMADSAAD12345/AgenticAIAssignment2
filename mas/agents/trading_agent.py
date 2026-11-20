@@ -133,10 +133,14 @@ class TradingAgent(Worker):
             except GameError as e:
                 skipped.append({'mission': m['id'], 'code': e.code, 'message': e.message[:120]})
         reserve: dict[str, int] = {}
-        for m in await ops.missions_active():
-            for o in m['objectives']:
-                if o.get('item_id') and o.get('quantity'):
-                    reserve[o['item_id']] = reserve.get(o['item_id'], 0) + int(o['quantity'] - (o.get('current') or 0))
+        if isinstance(params.get('reserve'), dict):
+            # coordinator-computed reserve: only missions that can still progress keep their ore
+            reserve = {k: int(v) for k, v in params['reserve'].items()}
+        else:
+            for m in await ops.missions_active():
+                for o in m['objectives']:
+                    if o.get('item_id') and o.get('quantity'):
+                        reserve[o['item_id']] = reserve.get(o['item_id'], 0) + int(o['quantity'] - (o.get('current') or 0))
         for k in params.get('keep_items') or []:
             reserve[k] = 10 ** 9
         if params.get('sell', True):

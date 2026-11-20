@@ -12,7 +12,8 @@ from mas import config
 from mas.a2a_util import send_task, wait_for_worker
 from mas.llm import Planner
 from mas.log import event
-from mas.policy import SKILL_AGENT, allowances, combined_progress, fallback_plan, mission_candidates, validate_plan
+from mas.policy import (SKILL_AGENT, allowances, combined_progress, fallback_plan, market_mission_need,
+                        mission_candidates, sale_value, validate_plan)
 from mas.store import Store
 
 AGENT = 'coordinator'
@@ -235,6 +236,8 @@ class Coordinator:
                 'belts_ok': [b['id'] for b in o.get('belts_ok', o.get('belts', []))][:3],
                 'depleted_belts_here': o.get('depleted_belts_here', [])[:5],
                 'connections': [(c['system_id'], c.get('distance')) for c in o.get('connections', [])][:5],
+                'sale_value_now': int(sale_value(o)) if st['docked'] else 0,
+                'market_mission_units_needed': market_mission_need(o),
                 'mission_slots_free': max(0, self.cfg['limits']['max_active_missions_per_pilot']
                                           - len(o.get('active_missions', []))),
                 'market_bids': {k: v.get('bid') for k, v in (o.get('market') or {}).items()},
