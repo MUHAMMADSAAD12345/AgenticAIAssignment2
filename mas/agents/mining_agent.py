@@ -63,7 +63,7 @@ class MiningAgent(Worker):
                     ops.log('mining.stopped', belt=belt['id'], code=e.code, message=e.message[:160])
                     break
                 mined_actions += 1
-                st = await ops.status()
+                st = await ops.status(full=False)  # get_status only: cargo_used, fuel, hull
                 gained = (st['cargo_used'] or 0) - (before or 0)
                 ops.log('game.confirmed', what='mined', belt=belt['id'], cargo_gain=gained,
                         cargo=f'{st["cargo_used"]}/{st["cargo_capacity"]}')

@@ -49,7 +49,24 @@ def wait_for(pred, timeout=120):
     return False
 
 
+def ports_in_use(ports=(8765, 9998, 9999)):
+    import socket
+    busy = []
+    for port in ports:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex(('127.0.0.1', port)) == 0:
+                busy.append(port)
+    return busy
+
+
 def main():
+    # Safety: if real MAS workers are already listening on these ports, the test coordinator would send
+    # its tasks to them and they would act on the REAL pilots. Refuse to run instead.
+    busy = ports_in_use()
+    if busy:
+        raise SystemExit(f'E2E MOCK TEST ABORTED: ports {busy} are in use (are real MAS workers running?). '
+                         'Stop them first; this test must only talk to its own mock workers.')
     logs = Path(tempfile.mkdtemp(prefix='mas_e2e_'))
     procs = {}
     try:

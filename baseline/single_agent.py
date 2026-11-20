@@ -52,12 +52,12 @@ async def run(cfg, pilot, minutes, max_loops):
                     raise SafetyStop('no belt')
                 await ops.travel(belts[0]['id'], 'travel:belt')
                 for i in range(cfg['limits']['max_mining_actions_per_cycle']):
-                    before = (await ops.status())['cargo_used']
+                    before = (await ops.status(full=False))['cargo_used']
                     try:
                         await ops.mutate(f'mine:{i}', 'mine')
                     except GameError:
                         break
-                    st = await ops.status()
+                    st = await ops.status(full=False)
                     ops.log('game.confirmed', what='mined', cargo_gain=st['cargo_used'] - before)
                     if st['cargo_free'] <= 0:
                         break

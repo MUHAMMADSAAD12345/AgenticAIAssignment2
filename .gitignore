@@ -12,3 +12,4 @@ submission/
 *_submission.zip
 config.local.json
 pip-cache/
+logs/**/*.out

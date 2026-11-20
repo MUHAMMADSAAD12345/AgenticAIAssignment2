@@ -22,6 +22,7 @@ import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from mas import pacer
 from mas.log import event, sanitize
 
 DEFAULT_TOOL = {
@@ -193,6 +194,7 @@ class GameSession:
         self.session: ClientSession | None = None
         self._stack: AsyncExitStack | None = None
         self._session_id: str | None = None
+        self._rate_limited_until = 0.0
         self.calls = 0
         self.mutations = 0
 
@@ -215,7 +217,10 @@ class GameSession:
     async def connect(self):
         await self.close()
         stack = AsyncExitStack()
-        http = httpx2.AsyncClient(timeout=httpx2.Timeout(30.0, read=self.timeout + 30))
+        hooks = {'response': [self._on_response]}
+        if not re.search(r'//(127\.0\.0\.1|localhost)\b', self.url):
+            hooks['request'] = [pacer.on_request]  # shared 60/min-per-IP gateway limit
+        http = httpx2.AsyncClient(timeout=httpx2.Timeout(30.0, read=self.timeout + 30), event_hooks=hooks)
         await stack.enter_async_context(http)
         read, write = await stack.enter_async_context(streamable_http_client(self.url, http_client=http))
         session = await stack.enter_async_context(ClientSession(read, write))
@@ -230,6 +235,14 @@ class GameSession:
         self._stack, self.session = stack, session
         event('mcp.initialized', agent=self.agent, task_id=self.task_id, pilot=self.pilot_key,
               endpoint=self.url, tools=sorted(self.tools), actions_discovered=len(self.action_tool))
+
+    async def _on_response(self, response):
+        if response.status_code == 429:
+            retry = _num_or(response.headers.get('retry-after'), 15.0)
+            self._rate_limited_until = time.time() + retry
+            pacer.penalize(retry)
+            event('mcp.rate_limited', agent=self.agent, task_id=self.task_id, pilot=self.pilot_key,
+                  retry_after=retry, note='gateway cap 60 requests/min per IP; all processes paused')
 
     async def login(self):
         password = password_for(self.cfg, self.pilot_key, self.username)
@@ -324,6 +337,11 @@ class GameSession:
         except Exception as e:
             if isinstance(e, GameError):
                 raise
+            if self._rate_limited_until > time.time() - 2:
+                # HTTP 429 from the gateway: the request was rejected before reaching the game, so it is safe
+                # to retry (even a mutation) after Retry-After instead of reconnecting.
+                raise GameError('rate_limited', 'gateway 429: 60 requests/min per IP',
+                                retry_after=max(1.0, self._rate_limited_until - time.time())) from e
             raise RuntimeError(f'MCP call failed: {type(e).__name__}: {e}') from e
         data, text = parse_tool_result(res)
         err = classify_error(res, data, text)
@@ -366,3 +384,10 @@ def _summary(data: dict, text: str) -> str:
     if text:
         return text[:240]
     return json.dumps({k: data[k] for k in list(data)[:8]}, default=str)[:240]
+
+
+def _num_or(value, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default

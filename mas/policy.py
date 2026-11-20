@@ -63,14 +63,17 @@ def fallback_plan(obs: dict[str, dict], progress: dict, cfg: dict, history: list
     al = allowances(progress, cfg)
     explored_needed = not progress['met']['systems_explored']
     explore_done = any(h['skill'] == 'explore_adjacent' and h['status'] == 'completed' for h in history)
-    assignments, reasons = [], []
+    assignments, reasons, taken = [], [], set()
     for pilot, o in obs.items():
         if not o:
             continue
         st = o['status']
         recent_fail = [h for h in history[:6] if h['pilot'] == pilot and h['status'] == 'failed']
         active = o.get('active_missions') or []
-        cands = mission_candidates(o, cfg)
+        active_ids = {m.get('id') for m in active}
+        # spread the pilots over different missions (different ores) and never re-accept an active one
+        cands = [c for c in mission_candidates(o, cfg) if c['id'] not in active_ids]
+        cands = [c for c in cands if c['id'] not in taken] or cands
         cargo_frac = (st['cargo_used'] or 0) / (st['cargo_capacity'] or 1)
         if al['distance_left'] <= 0:
             if st['docked'] and st['cargo']:
@@ -84,6 +87,7 @@ def fallback_plan(obs: dict[str, dict], progress: dict, cfg: dict, history: list
         elif st['docked'] and cands and len(active) < cfg['limits']['max_active_missions_per_pilot'] and \
                 not any(h['skill'] == 'accept_mission' and h['pilot'] == pilot for h in recent_fail[:2]):
             assignments.append({'pilot': pilot, 'skill': 'accept_mission', 'params': {'mission_id': cands[0]['id']}})
+            taken.add(cands[0]['id'])
             reasons.append(f'{pilot}: accept best mining/market mission {cands[0]["title"]}')
         elif pilot == 'B' and explored_needed and not explore_done and st['docked'] and al['distance_left'] > 300:
             assignments.append({'pilot': pilot, 'skill': 'explore_adjacent',

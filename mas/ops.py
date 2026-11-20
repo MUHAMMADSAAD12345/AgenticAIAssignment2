@@ -13,16 +13,29 @@ from mas.mcp_game import GameError, GameSession, UnknownOutcome
 from mas.store import Store
 
 
-async def read_status(gs: GameSession) -> dict:
-    """Full pilot status from free queries (no tick cost).
+CARRY = ('system', 'poi', 'stats', 'home_base', 'home_poi', 'home_system')
+
+
+async def read_status(gs: GameSession, full: bool = True, cache: dict | None = None) -> dict:
+    """Pilot status from free queries (no tick cost).
 
     JSON servers (and the local mock) return everything from get_status. The live MCP v2 server returns
-    get_status as text without stats or location ids, so the rest is filled in from:
+    get_status as text without stats or location ids, so a *full* read also calls:
       get_player (JSON: credits, home, Service Record stats), get_system / get_poi headers (location ids)
       and get_cargo (item lines; cargo_used/capacity from get_status is the fallback for mining checks).
+    A *light* read (full=False) is get_status only, carrying location/stats over from the last full read in
+    `cache`. It is used inside the mining loop: the gateway allows only 60 HTTP requests/min per IP, and
+    mining only needs cargo_used/fuel/hull, which get_status provides. Only travel/jump change location,
+    and those always take a full read afterwards.
     """
     st = gsx.parse_status(await gs.call('get_status'))
     if st.get('system') is not None and st['stats'].get('credits_earned') is not None:
+        return st
+    if not full and cache:
+        for k in CARRY:
+            if cache.get(k) is not None:
+                st[k] = cache[k]
+        st['cargo_known'] = False
         return st
     try:
         pl = await gs.call('get_player')
@@ -36,7 +49,15 @@ async def read_status(gs: GameSession) -> dict:
     except GameError as e:
         event('observe.player_unavailable', agent=gs.agent, task_id=gs.task_id, pilot=gs.pilot_key, code=e.code)
     if st.get('system') is None and not st.get('in_transit'):
-        st['system'] = gsx.parse_system(await gs.call('get_system')).get('id')
+        names = getattr(gs, '_system_ids', None)
+        if names is None:
+            names = gs._system_ids = {}
+        if st.get('system_name') in names:
+            st['system'] = names[st['system_name']]
+        else:
+            st['system'] = gsx.parse_system(await gs.call('get_system')).get('id')
+            if st.get('system_name') and st['system']:
+                names[st['system_name']] = st['system']
         st['poi'] = gsx.parse_poi(await gs.call('get_poi')).get('id')
     if not st['cargo'] and st.get('cargo_used'):
         st['cargo'] = tf.cargo((await gs.call('get_cargo')).get('_text') or '')
@@ -63,8 +84,11 @@ class PilotOps:
         event(name, agent=self.agent, task_id=self.mid, pilot=self.gs.pilot_key, **data)
 
     # observations (free queries)
-    async def status(self) -> dict:
-        return await read_status(self.gs)
+    async def status(self, full: bool = True) -> dict:
+        st = await read_status(self.gs, full=full, cache=getattr(self, '_last_full', None))
+        if full:
+            self._last_full = st
+        return st
 
     async def system(self) -> dict:
         return gsx.parse_system(await self.gs.call('get_system'))
@@ -111,8 +135,8 @@ class PilotOps:
             self.log('observe.market_unavailable', code=e.code)
             return {}
 
-    async def snapshot(self) -> dict:
-        s = await self.status()
+    async def snapshot(self, full: bool = True) -> dict:
+        s = await self.status(full=full)
         return {k: s[k] for k in ('credits', 'system', 'poi', 'docked', 'docked_at', 'fuel', 'cargo', 'cargo_used')}
 
     # idempotent mutation
@@ -128,7 +152,9 @@ class PilotOps:
             if happened:
                 self.store.action_done(key, 'confirmed', {'reconciled': True})
                 return {'reconciled': True}
-        pre = await self.snapshot()
+        # mine needs only cargo_used/fuel (light read); sales, missions and movement keep a full pre-state
+        # because their reconcilers compare cargo items, location or credits.
+        pre = await self.snapshot(full=action != 'mine')
         self.store.action_sent(key, self.mid, self.gs.pilot_key, self.gs.tool_for(action), action, params, pre)
         try:
             resp = await self.gs.call(action, **params)

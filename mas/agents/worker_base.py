@@ -21,6 +21,20 @@ class Worker:
         self.store = Store(db_path or (config.LOGS / f'{self.agent}_agent.sqlite3'))
         self.pilot_locks: dict[str, asyncio.Lock] = {}
         self.inflight: dict[str, asyncio.Future] = {}
+        self.sessions: dict[str, GameSession] = {}
+
+    async def session_for(self, pilot: str, mid: str) -> GameSession:
+        """One authenticated MCP session per pilot, reused across tasks (the gateway allows only 60 HTTP
+        requests/min per IP, so reconnecting + logging in for every task wastes most of the budget).
+        Expired game sessions are handled inside GameSession.call by a single re-login."""
+        gs = self.sessions.get(pilot)
+        if gs is None or gs.session is None:
+            gs = GameSession(self.cfg, pilot, self.agent, task_id=mid)
+            await gs.connect()
+            await gs.login()
+            self.sessions[pilot] = gs
+        gs.task_id = mid
+        return gs
 
     async def handle(self, payload: dict, progress, a2a_task_id: str) -> dict:
         mid, skill, pilot = payload['mission_id'], payload['skill'], payload.get('pilot')
@@ -60,15 +74,22 @@ class Worker:
                       previous_status='running', runs=rec['runs'])
             t0 = time.time()
             try:
-                async with GameSession(self.cfg, pilot, self.agent, task_id=mid) as gs:
+                gs = await self.session_for(pilot, mid)
+                calls0, muts0 = gs.calls, gs.mutations
+                try:
                     ops = PilotOps(gs, self.store, mid, self.agent, self.cfg, params)
                     result = await getattr(self, 'skill_' + skill)(ops, params, progress)
-                    result.setdefault('ok', True)
-                    result['mcp_calls'] = gs.calls
-                    result['mcp_mutations'] = gs.mutations
-                    result['spent_this_task'] = ops.spent_here
-                    if ops.notes:
-                        result['notes'] = ops.notes
+                except (GameError, SafetyStop):
+                    raise
+                except Exception:
+                    self.sessions.pop(pilot, None)  # broken transport: reconnect on the next task
+                    raise
+                result.setdefault('ok', True)
+                result['mcp_calls'] = gs.calls - calls0
+                result['mcp_mutations'] = gs.mutations - muts0
+                result['spent_this_task'] = ops.spent_here
+                if ops.notes:
+                    result['notes'] = ops.notes
             except SafetyStop as e:
                 result = {'ok': False, 'error': 'safety_stop', 'detail': str(e)}
                 event('safety.stop', agent=self.agent, task_id=mid, detail=str(e))
