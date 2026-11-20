@@ -13,3 +13,4 @@ submission/
 config.local.json
 pip-cache/
 logs/**/*.out
+brag-output*/

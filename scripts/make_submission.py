@@ -20,7 +20,7 @@ from scripts.evidence import scrub
 ROOT = Path(__file__).resolve().parents[1]
 LOGS = ROOT / 'logs'
 SECRET_PAT = re.compile(r'gsk_[A-Za-z0-9_-]{15,}')
-EXCLUDE_DIRS = {'.venv', '__pycache__', '.git', 'submission', '.idea', '.vscode'}
+EXCLUDE_DIRS = {'.venv', '__pycache__', '.git', 'submission', '.idea', '.vscode', 'brag-output'}
 EXCLUDE_FILES = {'.env', 'config.local.json'}
 
 
