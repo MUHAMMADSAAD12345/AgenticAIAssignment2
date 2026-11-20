@@ -91,6 +91,10 @@ class Coordinator:
                 mem['depleted_belts'][b] = {'system': system, 't': when, 'by': task['pilot']}
                 changed = True
             units = result.get('ore_units_gained') or 0
+            if units and result.get('belt') in mem['depleted_belts']:
+                # belts regenerate: a belt that yielded ore again is no longer treated as depleted
+                mem['depleted_belts'].pop(result['belt'], None)
+                changed = True
             if system and (units or result.get('mining_actions')):
                 mem['system_yield'][system] = mem['system_yield'].get(system, 0) + units
                 changed = True
@@ -114,9 +118,13 @@ class Coordinator:
             if o:
                 here = (o.get('status') or {}).get('system')
                 belts_by_system.setdefault(here, set()).update(b['id'] for b in o.get('belts') or [])
-        # exhausted = every known belt depleted and no ore gained there since
-        exhausted = sorted(s for s, belts in belts_by_system.items()
-                           if belts and belts <= set(dep) and not mem['system_yield'].get(s))
+        # exhausted = no mining possible: every known belt depleted and no ore gained there since, OR the system
+        # was visited and has no belts at all (e.g. Market Prime, a pure trade hub). Without the second rule the
+        # planner re-scouted a belt-less system it had just left (live run 3, 2026-11-20).
+        no_belts = {s for s, v in mem['visited'].items() if s and not (v.get('belts') or [])}
+        exhausted = sorted((s for s, belts in belts_by_system.items()
+                            if belts and belts <= set(dep) and not mem['system_yield'].get(s)))
+        exhausted = sorted(set(exhausted) | no_belts)
         for o in obs.values():
             if not o:
                 continue

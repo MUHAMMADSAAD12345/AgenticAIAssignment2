@@ -104,7 +104,8 @@ def cargo(text: str) -> dict[str, int]:
     out: dict[str, int] = {}
     rows = table(text, 'quantity') or table(text, 'qty')
     for r in rows:
-        item = r.get('item_id') or r.get('id') or r.get('item') or slug(r.get('name') or r.get('item_name') or '')
+        # live format: "item\tqty\tsize" with display names ("Copper Ore") -> item ids ("copper_ore")
+        item = r.get('item_id') or r.get('id') or slug(r.get('item') or r.get('name') or r.get('item_name') or '')
         q = _int(r.get('quantity') or r.get('qty'), 0)
         if item and q:
             out[item] = out.get(item, 0) + q

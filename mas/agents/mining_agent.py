@@ -36,7 +36,7 @@ class MiningAgent(Worker):
         # belts the coordinator already knows are depleted (shared memory from earlier tasks)
         avoid = set(tried) | set(params.get('avoid_belts') or [])
         belts = gsx.belts_by_distance(system, st, avoid=avoid)
-        if params.get('belt_poi_id') and params['belt_poi_id'] not in tried:
+        if params.get('belt_poi_id') and params['belt_poi_id'] not in avoid:  # avoid list wins over a pinned belt
             belts = [b for b in system['pois'] if b['id'] == params['belt_poi_id']] + \
                     [b for b in belts if b['id'] != params['belt_poi_id']]
         if not belts and not gsx.is_belt(gsx.poi_by_id(system, st['poi']) or {}):

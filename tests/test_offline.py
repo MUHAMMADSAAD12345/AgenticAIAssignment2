@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -272,6 +273,22 @@ def test_relocation_rules():
         {'pilot': 'B', 'skill': 'accept_mission', 'params': {'mission_id': 'iron'}}]}, obs, CFG, prog)
     assert not clean and 'maximum number of active missions' in problems[0]
     assert gsx.unsafe_security('Lawless (no police)') and not gsx.unsafe_security('Maximum Security (empire capital)')
+    # regression (live run 3): a visited system with NO belts must never be re-scouted for mining
+    from mas.coordinator import Coordinator
+    co = Coordinator(CFG, SimpleNamespace(no_llm=True, worker_wait=1, assessed=False, cycles=0, max_minutes=0))
+    co.store.kv_set('world', {'depleted_belts': {'commerce_fields': {'system': 'haven', 't': time.time()}},
+                              'system_yield': {}, 'visited': {'market_prime': {'belts': [], 'bases': ['x']}}})
+    live = {p: {'status': {'system': 'haven', 'docked': True}, 'belts': [{'id': 'commerce_fields'}],
+                'connections': [{'system_id': 'market_prime', 'distance': 407},
+                                {'system_id': 'traders_rest', 'distance': 514}]} for p in 'AB'}
+    co.annotate(live)
+    assert 'market_prime' in live['A']['exhausted_systems'] and 'haven' in live['A']['exhausted_systems']
+    assert relocation_target('A', live, live['A'], {'distance_left': 1300}, set())[0] == 'traders_rest'
+    assert relocation_target('A', live, live['A'], {'distance_left': 41}, set())[0] is None  # over budget: stay
+    # a belt that yields ore again is no longer treated as depleted
+    co.learn({'skill': 'mine_cycle', 'pilot': 'B', 'task_id': 't'},
+             {'system': 'haven', 'belt': 'commerce_fields', 'mining_actions': 10, 'ore_units_gained': 10})
+    assert 'commerce_fields' not in co.memory()['depleted_belts'] and co.memory()['system_yield']['haven'] == 10
     print('[PASS] relocation policy (scout / wait / follow) and validator rules (depleted, adjacency, mission cap)')
 
 
