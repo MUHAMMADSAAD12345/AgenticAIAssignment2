@@ -178,14 +178,16 @@ pie showData
     "Not earned" : 1.5
 ```
 
-```mermaid
-pie showData
-    title Where the 2,466 credits came from
-    "9 Trade Crystals to station buy order (B)" : 2421
-    "7 Copper Ore (B)" : 21
-    "2 Silicon Ore to a player buy order (B)" : 20
-    "1 Copper Ore at Market Prime (A)" : 4
-```
+**Where the 2,466 credits came from.** Every credit came from a genuine exchange sale; no mission was
+completed. One observation-driven sale made almost all of it:
+
+| Run | Pilot | Sale | Units | Avg. price | Credits | Share |
+|---|---|---|---|---|---|---|
+| 6 | B | Trade Crystal → Grand Exchange station buy order | 9 | ~269 cr | **2,421** | **98.2%** |
+| 6 | B | Copper Ore → Grand Exchange | 7 | 3 cr | 21 | 0.9% |
+| 4 | B | Silicon Ore → a player's buy order, Grand Exchange | 2 | 10 cr | 20 | 0.8% |
+| 4 | A | Copper Ore → Market Prime Exchange | 1 | 4 cr | 4 | 0.2% |
+| | | **Total** | **19** | | **2,466** | **100%** |
 
 Assessed runtime used: 109.8 / 480 minutes over 6 runs (`python scripts\runtime.py status`; per-run detail in
 `logs/RUN_LOG.md`). LLM usage: 16 / 300 requests, 32,854 / 250,000 tokens (`python scripts\budget.py`).
