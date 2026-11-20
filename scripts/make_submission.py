@@ -85,6 +85,16 @@ def main():
                         '--out', str(sub / 'baseline_comparison.md')], cwd=ROOT, check=False)
     for f in LOGS.glob('events*.jsonl'):
         scrub_file(f, sub / 'logs' / f.name)
+    # run log, incident notes, discovered MCP schemas, and archived (re-scrubbed) event logs
+    for f in list(LOGS.glob('*.md')) + list(LOGS.glob('mcp_tools.json')) + list(LOGS.glob('archive/**/*')):
+        if not f.is_file() or f.suffix not in ('.md', '.json', '.jsonl'):
+            continue
+        dst = sub / 'logs' / f.relative_to(LOGS)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if f.suffix == '.jsonl':
+            scrub_file(f, dst)
+        else:
+            dst.write_text(SECRET_PAT.sub('[REDACTED]', f.read_text(encoding='utf-8')), encoding='utf-8')
     zpath = ROOT / f'{a.group}_submission.zip'
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
         for f in ROOT.rglob('*'):
