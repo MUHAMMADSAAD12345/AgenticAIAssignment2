@@ -150,8 +150,9 @@ class TradingAgent(Worker):
                 if market and bid is not None and bid < min_price:
                     skipped.append({'item': item, 'reason': f'best bid {bid} < floor {min_price}'})
                     continue
-                if market and item not in market and bid is None:
-                    skipped.append({'item': item, 'reason': 'no buyers listed at this station'})
+                if market and bid is None:
+                    # listed or not, no buy orders means `sell` cannot fill (live reply: "No buyers ... not moved")
+                    skipped.append({'item': item, 'reason': 'no buyers at this station'})
                     continue
                 before_qty, before_cr = qty, st['credits']
 
@@ -166,8 +167,13 @@ class TradingAgent(Worker):
                 st = await ops.status()
                 sold_qty = before_qty - st['cargo'].get(item, 0)
                 earned = st['credits'] - before_cr
-                sold.append({'item': item, 'quantity': sold_qty, 'credits': earned, 'bid_seen': bid,
-                             'server': (resp.get('message') or resp.get('_text') or '')[:160]})
+                server = (resp.get('message') or resp.get('_text') or '')[:160]
+                if sold_qty <= 0:
+                    # the game accepted the call but nothing left the hold: never report it as a sale
+                    skipped.append({'item': item, 'reason': 'not filled', 'server': server})
+                    ops.log('trade.not_filled', item=item, server=server)
+                    continue
+                sold.append({'item': item, 'quantity': sold_qty, 'credits': earned, 'bid_seen': bid, 'server': server})
                 ops.log('game.confirmed', what='exchange_sale', item=item, quantity=sold_qty, credits=earned)
         st = await ops.status()
         if st['fuel_frac'] < self.cfg['limits']['min_fuel_fraction']:

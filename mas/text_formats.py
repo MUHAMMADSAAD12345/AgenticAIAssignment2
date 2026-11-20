@@ -155,7 +155,7 @@ def poi(text: str) -> dict:
 
 
 _OBJ_ITEM = re.compile(r'\b(?:mine|deliver|collect|bring|supply|gather|haul)\s+([\d,]+)\s+(?:units?\s+of\s+)?'
-                       r'([A-Za-z][A-Za-z ]*?)\s*(?:\(|$|\bto\b|\bat\b)', re.I)
+                       r'([A-Za-z][A-Za-z ]*?)\s*(?=[:(\[,;|]|\s-\s|-\s|\s\d|$|\bto\b|\bat\b)', re.I)
 
 
 def missions(text: str) -> list[dict]:

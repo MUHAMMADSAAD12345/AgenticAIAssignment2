@@ -44,6 +44,8 @@ def mission_candidates(o: dict, cfg: dict) -> list[dict]:
         kind = gsx.mission_kind(m)
         if kind not in ('mining', 'market') or not gsx.mission_doable_here(m, kind):
             continue
+        if kind == 'mining' and 'belts_ok' in o and not o['belts_ok']:
+            continue  # no usable belt in this system (e.g. Market Prime): a mining mission cannot progress here
         qty = sum(ob.get('quantity') or 0 for ob in m['objectives'])
         if kind == 'mining' and qty > cap * 2:
             continue

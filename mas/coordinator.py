@@ -72,6 +72,7 @@ class Coordinator:
         mem.setdefault('depleted_belts', {})
         mem.setdefault('system_yield', {})
         mem.setdefault('visited', {})
+        mem.setdefault('learned', [])  # task ids already applied (a restart rebuild must not double-count yield)
         now = time.time()
         mem['depleted_belts'] = {b: v for b, v in mem['depleted_belts'].items() if now - v.get('t', 0) < self.DEPLETION_TTL}
         return mem
@@ -81,8 +82,9 @@ class Coordinator:
         mem, changed = self.memory(), False
         system = result.get('system')
         when = when or time.time()
-        if time.time() - when > self.DEPLETION_TTL:
+        if time.time() - when > self.DEPLETION_TTL or task['task_id'] in mem['learned']:
             return
+        mem['learned'] = (mem['learned'] + [task['task_id']])[-500:]
         if task['skill'] == 'mine_cycle':
             dep = list(result.get('depleted_belts') or [])
             if not dep and result.get('belt') and not result.get('mining_actions') and                     result.get('stop_reason') in ('depleted', 'too_sparse', 'no_gain', 'no_resources'):
