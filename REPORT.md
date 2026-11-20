@@ -46,24 +46,33 @@ Routine checks (schemas, safety, duplicate prevention, ore reservation) are dete
 one call every 2 cycles plus failure-triggered calls, 2 per rolling minute, a reserve of 10 requests and
 8,000 tokens, after which the deterministic policy takes over.
 
-## 4. Real outcomes (FILL IN from the live profiles and logs)
+## 4. Real outcomes (live API counters after run 6, 2026-11-20 18:27 UTC)
 
-| Statistic | Pilot A | Pilot B | Combined | Band marks |
+Verify on the public profiles before submitting: https://spacemolt.com/player/MenInBlack-P1 and
+https://spacemolt.com/player/MenInBlack-P2
+
+| Statistic | Pilot A (P1) | Pilot B (P2) | Combined | Band marks |
 |---|---|---|---|---|
-| Credits earned | | | | /8 |
-| Credits spent | | | | /3 |
-| Ore mined | | | | /4 |
-| Trades completed / Exchange items sold | | | | /4 |
-| Distance traveled (AU) | | | | /3 |
-| Systems explored | | | | /3 |
-| **Total** (`python -m scripts.platform_score ...`) | | | | **/25** |
+| Credits earned | 4 | 2,462 | 2,466 | 8/8 |
+| Credits spent | 0 | 0 | 0 | 3/3 |
+| Ore mined | 10 | 55 | 65 | 4/4 |
+| Trades completed / Exchange items sold | 1 / 1 | 3 / 18 | 4 / 19 | 4/4 |
+| Distance traveled (AU) | 1,253 | 34 | 1,287 | 3/3 |
+| Systems explored | 1 | 0 | 1 | 1.5/3 |
+| **Total** (`python -m scripts.platform_score --earned 2466 --spent 0 --ore 65 --trades 4 --exchange-sales 19 --distance 1287 --systems 1`) | | | | **23.5/25** |
 
-Assessed runtime used: FILL IN minutes (`python scripts\runtime.py status`).
-LLM usage: FILL IN requests / FILL IN tokens (`submission\llm_usage_summary.md`).
+The last 1.5 marks were deliberately not pursued. A second explored system needs a jump of at least 326,
+which would push combined distance past 1,500 (losing 2 marks to gain 1.5).
 
-Example evidence chain (FILL IN with a real task id from `logs\events.jsonl`): `plan.decided` (rationale)
--> `task.assigned` -> `a2a.task_received` -> `mcp.result` (action, args, server confirmation) ->
-`game.confirmed` -> `task.result`.
+Assessed runtime used: 109.8 / 480 minutes over 6 runs (`python scriptsuntime.py status`; per-run detail in
+`logs/RUN_LOG.md`). LLM usage: 16 / 300 requests, 32,854 / 250,000 tokens (`python scriptsudget.py`).
+Model: `openai/gpt-oss-20b` on Groq.
+
+Example evidence chain (real, task `MenInBlack-c0020-B-sell_and_complete`): `plan.decided` cycle-20
+(run 5) -> `task.assigned` (trading agent) -> the run was stopped before the reply -> after the restart
+(run 6) `recovery.resume_task` re-sent the same id -> `a2a.task_received` -> `mcp.result` `sell`
+`{id: trade_crystal, quantity: 16}` with server confirmation "Sold 9x Trade Crystal for 2421 credits
+from Grand Exchange Station. 7 unsold (not moved)" -> `task.result` "credits 270->2712".
 
 ## 5. Baseline comparison (FILL IN from `submission\baseline_comparison.md`)
 
