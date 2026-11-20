@@ -1,7 +1,22 @@
 # SpaceMolt MAS: report
 
-Group: **MenInBlack** | Members: FILL IN (Student 1), FILL IN (Student 2)
+Group: **MenInBlack** | Members: Muhammad Saad (i232084), Muhammad Alyun (i230022)
 Pilots: `https://spacemolt.com/player/MenInBlack-P1`, `https://spacemolt.com/player/MenInBlack-P2`
+
+**Result at a glance:** 23.5 / 25 platform marks · 2,466 credits earned · 65 ore · 19 exchange items sold ·
+0 credits spent · 1,287 distance · 109.8 / 480 assessed minutes · 16 / 300 LLM requests.
+
+```mermaid
+flowchart LR
+    O([👀 Observe<br/>both pilots]) --> P{🧠 Plan<br/>LLM or rules}
+    P --> V{🛡️ Validate<br/>safety · budgets}
+    V -- "❌ rejected" --> P
+    V -- "✔ valid" --> D[📨 Delegate<br/>over A2A]
+    D --> A[⚙️ Act<br/>MCP v2 calls]
+    A --> C[✅ Game-<br/>confirmed]
+    C --> R[(💾 Remember<br/>SQLite + logs)]
+    R -- "next cycle" --> O
+```
 
 ## 1. Strategy
 
@@ -19,9 +34,81 @@ while penalising waste (more than 1,500 credits spent or 1,500 AU travelled). Ou
   within a spend allowance (`spend_soft_cap` 1,200 < 1,500).
 * **Stop when all targets are met** so later activity cannot push spend or distance over the bands.
 
+### 1.1 How the strategy adapted to the live game
+
+The live game did not match the plan. Haven's only asteroid belt (Commerce Fields) is shared by many class
+pilots and was usually depleted. Market Prime, the nearest neighbour, has no belts at all. The MAS
+learned both facts into durable memory and changed its behaviour. In the end the credits came from
+**observation-driven selling** (a station buy order for Trade Crystals at 272 cr each), not from missions.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Observe
+    Observe --> Sell: buy orders for surplus ≥ 50 cr
+    Observe --> List: market mission and<br/>no buyers here
+    Observe --> Mine: usable belt here
+    Observe --> Relocate: every belt depleted<br/>and distance budget left
+    Observe --> Wait: nothing productive<br/>within the budgets
+    Mine --> Learn: depleted / yield
+    Relocate --> Learn: scout report<br/>(belts, police, bases)
+    Sell --> Learn: credits confirmed
+    List --> Learn
+    Learn --> Observe: memory updated
+    Wait --> [*]: 3 idle cycles → stop
+```
+
+The scout-then-follow rule for relocation, as tested in `tests/e2e_relocate.py` and run live in run 3:
+
+```mermaid
+flowchart LR
+    A{Usable belt in<br/>this system?} -- yes --> MINE[⛏️ mine_cycle]
+    A -- no --> B{Another pilot in a system<br/>with proven yield?}
+    B -- yes --> FOLLOW[🚀 relocate there<br/>follow]
+    B -- no --> C{Another pilot already<br/>scouting?}
+    C -- yes --> WAIT[⏳ wait for the scout]
+    C -- no --> D{Nearest neighbour not exhausted<br/>and within distance budget?}
+    D -- yes --> SCOUT[🔭 relocate<br/>scout]
+    D -- no --> STAY[🛑 stay and sell locally]
+```
+
 ## 2. Architecture
 
 See `docs/architecture.svg`. Three roles in three processes:
+
+```mermaid
+flowchart TB
+    subgraph COORD["Coordinator process · mas/coordinator.py"]
+        PL[Planner<br/>Groq LLM + budget ledger]
+        VA[validate_plan<br/>whitelist · safety · caps]
+        FB[fallback_plan<br/>deterministic rules]
+        MEM[(coordinator.sqlite3<br/>tasks · cycles · world memory)]
+    end
+    subgraph MW["Mining agent · :9999"]
+        MS[mine_cycle · observe]
+        ML[(mining_agent.sqlite3<br/>mutation ledger)]
+    end
+    subgraph TW["Trading / logistics agent · :9998"]
+        TS[accept · sell_and_complete<br/>list_item · relocate · observe]
+        TL[(trading_agent.sqlite3<br/>mutation ledger)]
+    end
+    PACE[[mas/pacer.py<br/>shared 50 req/min]]
+    GAME[(SpaceMolt game<br/>MCP v2 · 60 req/min/IP)]
+    LLM([Groq API<br/>openai/gpt-oss-20b])
+
+    PL <--> LLM
+    PL --> VA
+    FB --> VA
+    VA -- "A2A task<br/>{mission_id, skill, pilot, params}" --> MS
+    VA -- "A2A task" --> TS
+    MS -- "A2A result artifact" --> MEM
+    TS -- "A2A result artifact" --> MEM
+    MS <--> ML
+    TS <--> TL
+    MS --> PACE
+    TS --> PACE
+    PACE -- "authenticated MCP calls" --> GAME
+```
 
 * **Coordinator** (`mas/coordinator.py`): observes both pilots through A2A, computes combined progress,
   asks the LLM for a plan, validates it, delegates one task per pilot in parallel, records outcomes.
@@ -46,6 +133,21 @@ Routine checks (schemas, safety, duplicate prevention, ore reservation) are dete
 one call every 2 cycles plus failure-triggered calls, 2 per rolling minute, a reserve of 10 requests and
 8,000 tokens, after which the deterministic policy takes over.
 
+```mermaid
+flowchart TB
+    CTX["Compact JSON context<br/>progress · allowances · cargo<br/>belts_ok · sale_value_now<br/>memory · recent failures"] --> Q{Budget OK?<br/>≤2 req/min · reserve kept}
+    Q -- no --> FB[Fallback policy]
+    Q -- yes --> LLM[[gpt-oss-20b]]
+    LLM --> P["JSON plan<br/>one task per pilot + rationale"]
+    P --> V{validate_plan}
+    V -- "invalid parts" --> FB
+    V -- valid --> GO([Delegate over A2A])
+    FB --> GO
+```
+
+In the live runs the validator rejected **6** LLM proposals. Most were "explore an adjacent system" once
+the distance budget was nearly used, which would have cost more marks than it gained.
+
 ## 4. Real outcomes (live API counters after run 6, 2026-11-20 18:27 UTC)
 
 Verify on the public profiles before submitting: https://spacemolt.com/player/MenInBlack-P1 and
@@ -64,9 +166,29 @@ https://spacemolt.com/player/MenInBlack-P2
 The last 1.5 marks were deliberately not pursued. A second explored system needs a jump of at least 326,
 which would push combined distance past 1,500 (losing 2 marks to gain 1.5).
 
-Assessed runtime used: 109.8 / 480 minutes over 6 runs (`python scripts
-untime.py status`; per-run detail in
-`logs/RUN_LOG.md`). LLM usage: 16 / 300 requests, 32,854 / 250,000 tokens (`python scriptsudget.py`).
+```mermaid
+pie showData
+    title Platform marks earned (23.5 of 25)
+    "Credits earned (8/8)" : 8
+    "Ore mined (4/4)" : 4
+    "Trade / exchange sale (4/4)" : 4
+    "Controlled spending (3/3)" : 3
+    "Travel efficiency (3/3)" : 3
+    "Systems explored (1.5/3)" : 1.5
+    "Not earned" : 1.5
+```
+
+```mermaid
+pie showData
+    title Where the 2,466 credits came from
+    "9 Trade Crystals to station buy order (B)" : 2421
+    "7 Copper Ore (B)" : 21
+    "2 Silicon Ore to a player buy order (B)" : 20
+    "1 Copper Ore at Market Prime (A)" : 4
+```
+
+Assessed runtime used: 109.8 / 480 minutes over 6 runs (`python scripts\runtime.py status`; per-run detail in
+`logs/RUN_LOG.md`). LLM usage: 16 / 300 requests, 32,854 / 250,000 tokens (`python scripts\budget.py`).
 Model: `openai/gpt-oss-20b` on Groq.
 
 Example evidence chain (real, task `MenInBlack-c0020-B-sell_and_complete`): `plan.decided` cycle-20
@@ -74,6 +196,28 @@ Example evidence chain (real, task `MenInBlack-c0020-B-sell_and_complete`): `pla
 (run 6) `recovery.resume_task` re-sent the same id -> `a2a.task_received` -> `mcp.result` `sell`
 `{id: trade_crystal, quantity: 16}` with server confirmation "Sold 9x Trade Crystal for 2421 credits
 from Grand Exchange Station. 7 unsold (not moved)" -> `task.result` "credits 270->2712".
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Coordinator
+    participant T as Trading agent (A2A :9998)
+    participant L as Mutation ledger (SQLite)
+    participant G as SpaceMolt MCP v2
+    Note over C: run 5 · cycle 20 · plan.decided
+    C->>T: A2A task MenInBlack-c0020-B-sell_and_complete
+    Note over C,T: run 5 stopped before the reply
+    Note over C: run 6 start · recovery.resume_task (same id)
+    C->>T: A2A task MenInBlack-c0020-B-sell_and_complete
+    T->>L: step not yet confirmed → proceed
+    T->>G: view_market (Trade Crystal bid 272 cr)
+    T->>L: record "sent" (pre-state: cargo, credits)
+    T->>G: sell {id: trade_crystal, quantity: 16}
+    G-->>T: "Sold 9x Trade Crystal for 2421 credits … 7 unsold (not moved)"
+    T->>G: get_status (cargo −9, credits 270 → 2712)
+    T->>L: record "confirmed"
+    T-->>C: result artifact · ok · "credits 270->2712"
+```
 
 ## 5. Baseline comparison (live game; `logs/comparison.md`, `submission/baseline_comparison.md`)
 
@@ -94,6 +238,26 @@ pilots' counters are untouched. Figures below are the game's own Service Record 
 | Credits per game mutation | 0.1 (8 / 80) | ~20.9 (2,466 / 118) |
 | MCP errors / recoveries logged | 9 / 0 | 16 / 21 |
 | LLM requests / tokens | 0 / 0 | 16 / 32,854 |
+
+```mermaid
+flowchart LR
+    subgraph B["Baseline: 1 pilot · fixed loop · 30 min"]
+        direction TB
+        B1[Dock] --> B2[Accept first mining mission] --> B3[Mine nearest belt] --> B4[Return and dock] --> B5[Sell everything,<br/>buyers or not] --> B1
+    end
+    subgraph M["MAS: 2 pilots · observe → plan → validate → delegate"]
+        direction TB
+        M1[Observe + memory] --> M2{Plan}
+        M2 --> M3[Sell only where<br/>buyers exist]
+        M2 --> M4[Mine only usable belts]
+        M2 --> M5[Relocate / wait<br/>within budgets]
+        M3 --> M6[Learn] --> M1
+        M4 --> M6
+        M5 --> M6
+    end
+    B -. "8 cr · 50 ore" .-> RB((Baseline<br/>result))
+    M -. "2,466 cr · 65 ore" .-> RM((MAS<br/>result))
+```
 
 Discussion. The baseline mined ore faster: one pilot looped on the belt without planning overhead, while the
 MAS lost time to the depleted Haven belt, a scouting jump to belt-less Market Prime, and a re-scouting bug (run 3)
@@ -120,6 +284,42 @@ resumed, mission resumed from ledger, session expiry re-login, `action_pending` 
 equals the game's exchange counter, i.e. no duplicate sale).
 
 Live restarts on the real game (`logs/RUN_LOG.md`, `submission/logs/events.jsonl`):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Coordinator
+    participant W as Workers (mining :9999 · trading :9998)
+    participant L as Worker ledgers (SQLite)
+    participant G as SpaceMolt MCP v2
+    C->>W: A2A c0010-B-mine_cycle · c0010-A-accept_mission
+    Note over W: 13:04:01 both worker processes killed
+    W--xC: connection lost
+    C->>C: a2a.handoff_failed → "resend same mission_id"
+    Note over W: restarted with fixes
+    C->>W: same mission ids re-sent
+    W->>L: mission found → recovery.resume_mission (13:04:17)
+    L-->>W: confirmed steps are skipped, unknown steps reconciled
+    W->>G: continue: accept_mission / travel + mine
+    G-->>W: game-confirmed outcome
+    W-->>C: task.result ok (no action repeated)
+```
+
+```mermaid
+gantt
+    title Assessed runs and baseline (2026-11-20, UTC)
+    dateFormat HH:mm
+    axisFormat %H:%M
+    section Assessed MAS runs
+    Run 1 · 429 rate limit, stopped       :crit, r1, 11:24, 1m
+    Run 2 · first chain, belt depleted    :r2, 11:40, 12m
+    Run 3 · memory + scouting             :r3, 12:18, 25m
+    Run 4 · first sales, worker restart   :active, r4, 12:54, 47m
+    Run 5 · belt exhausted by others      :r5, 13:44, 21m
+    Run 6 · 2,421 cr crystal sale         :done, r6, 18:20, 5m
+    section Practice pilot
+    Single-agent baseline (MIB-practice)  :b1, 18:58, 35m
+```
 
 * **Worker restart mid-run (run 4, 2026-11-20 13:04 UTC).** Both worker processes were killed while tasks
   `MenInBlack-c0010-B-mine_cycle` and `MenInBlack-c0010-A-accept_mission` were in flight. The coordinator logged
