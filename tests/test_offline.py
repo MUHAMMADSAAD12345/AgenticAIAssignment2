@@ -242,8 +242,42 @@ def test_live_text_formats():
     print('[PASS] live MCP v2 text formats (status, system, poi, missions, market, cargo)')
 
 
+def test_relocation_rules():
+    from mas.policy import relocation_target, allowances
+    o = obs_for({'cargo': {}, 'cargo_used': 0, 'cargo_free': 60})
+    o['status']['system'] = 'haven'
+    o.update({'belts': [{'id': 'commerce_fields'}], 'belts_ok': [], 'depleted_belts_here': ['commerce_fields'],
+              'connections': [{'system_id': 'market_prime', 'distance': 407}, {'system_id': 'traders_rest', 'distance': 514}],
+              'system_yield': {}, 'exhausted_systems': ['haven'], 'active_missions': [{'id': 'm'}] * 4})
+    obs = {'A': o, 'B': json.loads(json.dumps(o))}
+    prog = combined_progress(obs, CFG)
+    al = allowances(prog, CFG)
+    assert relocation_target('A', obs, o, al, set())[0] == 'market_prime'          # scout nearest
+    assert relocation_target('B', obs, o, al, {'market_prime'})[0] is None          # wait for the scout
+    obs['A']['status']['system'] = 'market_prime'
+    obs['B']['system_yield'] = {'market_prime': 12}
+    assert relocation_target('B', obs, obs['B'], al, set())[0] == 'market_prime'    # follow proven yield
+    clean, problems = validate_plan({'assignments': [
+        {'pilot': 'B', 'skill': 'mine_cycle', 'params': {}}]}, obs, CFG, prog)
+    assert not clean and 'known depleted' in problems[0]
+    clean, problems = validate_plan({'assignments': [
+        {'pilot': 'B', 'skill': 'relocate', 'params': {'target_system': 'sirius'}}]}, obs, CFG, prog)
+    assert not clean and 'not adjacent' in problems[0]
+    clean, _ = validate_plan({'assignments': [
+        {'pilot': 'B', 'skill': 'relocate', 'params': {'target_system': 'market_prime', 'x': 1}}]}, obs, CFG, prog)
+    assert clean[0]['params']['target_system'] == 'market_prime' and 'x' not in clean[0]['params']
+    obs['B']['available_missions'] = [{'id': 'iron', 'title': 'Iron', 'type': 'mining', 'description': '',
+                                       'objectives': [{'item_id': 'iron_ore', 'quantity': 10}]}]
+    clean, problems = validate_plan({'assignments': [
+        {'pilot': 'B', 'skill': 'accept_mission', 'params': {'mission_id': 'iron'}}]}, obs, CFG, prog)
+    assert not clean and 'maximum number of active missions' in problems[0]
+    assert gsx.unsafe_security('Lawless (no police)') and not gsx.unsafe_security('Maximum Security (empire capital)')
+    print('[PASS] relocation policy (scout / wait / follow) and validator rules (depleted, adjacency, mission cap)')
+
+
 def main():
     test_schema_validation()
+    test_relocation_rules()
     test_parsers()
     test_live_text_formats()
     test_error_classification()

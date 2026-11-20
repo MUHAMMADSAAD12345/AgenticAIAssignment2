@@ -64,6 +64,70 @@ class Coordinator:
         self.pilots = list(cfg['pilots'])
         self.idle_cycles = 0
 
+    # ---- shared world memory (durable in coordinator.sqlite3, survives restarts) ----
+    DEPLETION_TTL = 6 * 3600  # belts regenerate slowly; re-try a depleted belt after a few hours
+
+    def memory(self) -> dict:
+        mem = self.store.kv_get('world', None) or {}
+        mem.setdefault('depleted_belts', {})
+        mem.setdefault('system_yield', {})
+        mem.setdefault('visited', {})
+        now = time.time()
+        mem['depleted_belts'] = {b: v for b, v in mem['depleted_belts'].items() if now - v.get('t', 0) < self.DEPLETION_TTL}
+        return mem
+
+    def learn(self, task: dict, result: dict, when: float | None = None, quiet: bool = False):
+        """Turn worker results into durable observations the planner uses next cycle."""
+        mem, changed = self.memory(), False
+        system = result.get('system')
+        when = when or time.time()
+        if time.time() - when > self.DEPLETION_TTL:
+            return
+        if task['skill'] == 'mine_cycle':
+            dep = list(result.get('depleted_belts') or [])
+            if not dep and result.get('belt') and not result.get('mining_actions') and                     result.get('stop_reason') in ('depleted', 'too_sparse', 'no_gain', 'no_resources'):
+                dep = [result['belt']]  # results written before depleted_belts existed
+            for b in dep:
+                mem['depleted_belts'][b] = {'system': system, 't': when, 'by': task['pilot']}
+                changed = True
+            units = result.get('ore_units_gained') or 0
+            if system and (units or result.get('mining_actions')):
+                mem['system_yield'][system] = mem['system_yield'].get(system, 0) + units
+                changed = True
+        if task['skill'] in ('relocate', 'explore_adjacent') and isinstance(result.get('explored'), dict):
+            rep = result['explored']
+            mem['visited'][rep.get('system')] = {k: rep.get(k) for k in ('name', 'police_level', 'bases', 'belts')}
+            changed = True
+        if changed:
+            self.store.kv_set('world', mem)
+            if quiet:
+                return
+            event('memory.updated', agent=AGENT, task_id=task['task_id'], depleted_belts=sorted(mem['depleted_belts']),
+                  system_yield=mem['system_yield'], visited=sorted(k for k in mem['visited'] if k))
+
+    def annotate(self, obs: dict):
+        """Add memory-derived facts to fresh observations (belts known depleted, systems with proven yield)."""
+        mem = self.memory()
+        dep = mem['depleted_belts']
+        belts_by_system = {s: set(v.get('belts') or []) for s, v in mem['visited'].items() if s}
+        for o in obs.values():
+            if o:
+                here = (o.get('status') or {}).get('system')
+                belts_by_system.setdefault(here, set()).update(b['id'] for b in o.get('belts') or [])
+        # exhausted = every known belt depleted and no ore gained there since
+        exhausted = sorted(s for s, belts in belts_by_system.items()
+                           if belts and belts <= set(dep) and not mem['system_yield'].get(s))
+        for o in obs.values():
+            if not o:
+                continue
+            belts = o.get('belts') or []
+            o['depleted_belts_here'] = [b['id'] for b in belts if b['id'] in dep]
+            o['belts_ok'] = [b for b in belts if b['id'] not in dep]
+            o['system_yield'] = mem['system_yield']
+            o['exhausted_systems'] = exhausted
+        mem['exhausted_systems'] = exhausted
+        return mem
+
     def tid(self, cycle, pilot, skill):
         return f'{self.gid}-c{cycle:04d}-{pilot}-{skill}'
 
@@ -95,6 +159,8 @@ class Coordinator:
             status = 'completed' if out['state'] == 'completed' and result.get('ok') else 'failed'
             self.store.task_update(task['task_id'], status=status, a2a_task_id=out['a2a_task_id'], result=result,
                                    error=result.get('error'))
+            if task['skill'] != 'observe':
+                self.learn(task, result)
             event('task.result', agent=AGENT, task_id=task['task_id'], a2a_task_id=out['a2a_task_id'], worker=agent,
                   state=out['state'], ok=result.get('ok'), summary=result.get('summary'), error=result.get('error'),
                   seconds=out['seconds'], replayed=result.get('replayed_from_memory', False))
@@ -118,8 +184,22 @@ class Coordinator:
             return prev['data']
         return None
 
+    def rebuild_memory(self):
+        """After a restart, re-derive world memory from durable task results (no game calls needed)."""
+        for t in reversed(self.store.tasks_recent(300)):
+            if t['skill'] in ('mine_cycle', 'relocate', 'explore_adjacent') and t['status'] in ('completed', 'failed')                     and isinstance(t.get('result'), dict):
+                self.learn(t, t['result'], when=t.get('updated'), quiet=True)
+        mem = self.memory()
+        event('recovery.memory_rebuilt', agent=AGENT, depleted_belts=sorted(mem['depleted_belts']),
+              system_yield=mem['system_yield'], visited=sorted(k for k in mem['visited'] if k))
+
     async def recover_unfinished(self):
         pending = [t for t in self.store.tasks_unfinished() if t['skill'] != 'observe']
+        dep = sorted(self.memory()['depleted_belts'])
+        for t in pending:
+            if t['skill'] == 'mine_cycle' and dep:
+                # re-validate against fresh memory: never re-send a miner to a belt learned to be depleted
+                t['params'] = dict(t.get('params') or {}, avoid_belts=dep)
         for t in pending:
             event('recovery.resume_task', agent=AGENT, task_id=t['task_id'], skill=t['skill'], pilot=t['pilot'],
                   previous_status=t['status'], note='re-sending same mission id after restart')
@@ -141,17 +221,27 @@ class Coordinator:
                 'active_missions': [{'id': m['id'], 'title': m['title'], 'objectives': m['objectives'][:3],
                                      'pct': m.get('percent_complete')} for m in o.get('active_missions', [])][:3],
                 'candidate_missions': mission_candidates(o, self.cfg)[:5],
-                'belts': o.get('belts', [])[:3], 'connections': o.get('connections', [])[:3],
+                'system': st.get('system'),
+                'belts_ok': [b['id'] for b in o.get('belts_ok', o.get('belts', []))][:3],
+                'depleted_belts_here': o.get('depleted_belts_here', [])[:5],
+                'connections': [(c['system_id'], c.get('distance')) for c in o.get('connections', [])][:5],
+                'mission_slots_free': max(0, self.cfg['limits']['max_active_missions_per_pilot']
+                                          - len(o.get('active_missions', []))),
                 'market_bids': {k: v.get('bid') for k, v in (o.get('market') or {}).items()},
             }
         recent = [{'pilot': t['pilot'], 'skill': t['skill'], 'status': t['status'], 'error': t['error'],
                    'summary': (t['result'] or {}).get('summary')} for t in self.store.tasks_recent(8) if t['skill'] != 'observe']
+        mem = self.memory()
         return {'cycle': cycle, 'progress': progress['totals'], 'targets_met': progress['met'],
+                'memory': {'system_yield': mem['system_yield'],
+                           'exhausted_systems': next((o.get('exhausted_systems') for o in self.obs.values() if o), []),
+                           'visited': {k: v.get('belts') for k, v in mem['visited'].items() if k}},
                 'allowances': allowances(progress, self.cfg), 'pilots': pilots, 'recent_tasks': recent[:6]}
 
     async def run_cycle(self, cycle: int) -> bool:
         obs = await asyncio.gather(*(self.observe(cycle, p) for p in self.pilots))
         self.obs = dict(zip(self.pilots, obs))
+        mem = self.annotate(self.obs)
         if not any(self.obs.values()):
             event('cycle.no_observation', agent=AGENT, task_id=f'cycle-{cycle}', note='all workers/pilots unavailable')
             await asyncio.sleep(30)
@@ -214,6 +304,7 @@ class Coordinator:
         event('coordinator.started', agent=AGENT, pilots=self.cfg['pilots'], workers=self.workers,
               llm=self.planner.enabled, assessed=bool(ledger))
         try:
+            self.rebuild_memory()
             await self.recover_unfinished()
             cycle = self.store.cycle_last()
             max_cycles = self.args.cycles or self.cfg['limits']['max_cycles']

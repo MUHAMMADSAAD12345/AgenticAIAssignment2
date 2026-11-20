@@ -27,15 +27,23 @@ class MiningAgent(Worker):
         target_item = params.get('target_item')
         st = await ops.status()
         start_cargo = dict(st['cargo'])
+        start_used = st['cargo_used'] or 0
         start_ore_stat = st['stats'].get('ore_mined')
         system = await ops.system()
         cp = ops.store.mission_get(ops.mid)['checkpoint'] or {}
         tried = list(cp.get('tried_belts', []))
-        belts = gsx.belts_by_distance(system, st, avoid=tried)
+        depleted = list(cp.get('depleted_belts', []))
+        # belts the coordinator already knows are depleted (shared memory from earlier tasks)
+        avoid = set(tried) | set(params.get('avoid_belts') or [])
+        belts = gsx.belts_by_distance(system, st, avoid=avoid)
         if params.get('belt_poi_id') and params['belt_poi_id'] not in tried:
             belts = [b for b in system['pois'] if b['id'] == params['belt_poi_id']] + \
                     [b for b in belts if b['id'] != params['belt_poi_id']]
         if not belts and not gsx.is_belt(gsx.poi_by_id(system, st['poi']) or {}):
+            known = [p['id'] for p in system['pois'] if gsx.is_belt(p)]
+            if known:
+                return {'ok': False, 'error': 'belts_depleted', 'system': st.get('system'), 'depleted_belts': known,
+                        'summary': f'all belts in {st.get("system")} known depleted: {known}'}
             raise SafetyStop('no asteroid belt visible in this system')
         if st['cargo_free'] <= 0 and st['cargo_capacity']:
             ops.notes.append('cargo already full; skipping mining')
@@ -83,7 +91,10 @@ class MiningAgent(Worker):
             if stop_reason in ('cargo_full', 'target_reached') or mined_actions >= max_actions:
                 break
             tried.append(belt['id'])
-            ops.store.mission_checkpoint(ops.mid, {'tried_belts': tried, 'belt': belt['id'], 'mined_actions': mined_actions})
+            if stop_reason in STOP_CODES or stop_reason == 'no_gain':
+                depleted.append(belt['id'])
+            ops.store.mission_checkpoint(ops.mid, {'tried_belts': tried, 'depleted_belts': depleted,
+                                                    'belt': belt['id'], 'mined_actions': mined_actions})
             ops.log('recovery.alternate_belt', reason=stop_reason, tried=tried)
         if params.get('return_to_base', True):
             await progress('returning to base')
@@ -96,6 +107,8 @@ class MiningAgent(Worker):
                 'error': None if (mined_actions or gained) else (stop_reason or 'nothing_mined'),
                 'summary': f'mined {mined_actions} actions at {belt_used}, gained {gained}, stop={stop_reason}',
                 'belt': belt_used, 'mining_actions': mined_actions, 'cargo_gained': gained,
+                'system': st.get('system'), 'depleted_belts': depleted,
+                'ore_units_gained': sum(gained.values()) if gained else max(0, (st['cargo_used'] or 0) - start_used),
                 'ore_mined_stat_delta': (ore_stat - start_ore_stat) if None not in (ore_stat, start_ore_stat) else None,
                 'stop_reason': stop_reason, 'docked': st['docked'], 'cargo': st['cargo'],
                 'cargo_used': st['cargo_used'], 'cargo_capacity': st['cargo_capacity']}

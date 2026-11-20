@@ -22,7 +22,12 @@ Each cycle assign AT MOST ONE task per pilot from these skills:
 - sell_and_complete {keep_items?:[str], min_price?:int}  (dock, complete satisfied missions, sell surplus)
 - list_item {item_id:str, quantity:int, price_each:int}  (only for market-participation missions)
 - explore_adjacent {max_distance:number, return_home:true}  (only if systems_explored target unmet)
+- relocate {target_system:str}  (one jump to an ADJACENT system from that pilot's connections, then dock there)
 - wait {}
+Belts: a pilot can only mine where belts_ok is non-empty. If belts_ok is empty, mining there is impossible:
+follow the other pilot to a system whose system_yield > 0, or (if no system is proven) send ONE pilot to scout
+the nearest neighbour not in exhausted_systems while the other waits. Each jump adds its distance to
+distance_traveled, so stay within allowances.distance_left. accept_mission needs mission_slots_free > 0.
 Use only fresh facts given. Reply with ONLY a JSON object:
 {"rationale":"<=40 words","assignments":[{"pilot":"A","skill":"...","params":{...}}]}"""
 

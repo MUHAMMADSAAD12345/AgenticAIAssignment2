@@ -6,8 +6,11 @@ Skills:
   sell_and_complete  dock, complete satisfied missions, sell surplus ore on the station exchange
   list_item          post a small sell order (market-participation missions)
   explore_adjacent   jump to the nearest safe neighbouring system, record its market, optionally return
+  relocate           move the pilot's operating base to an adjacent system (scouting / following a good belt)
 """
 from __future__ import annotations
+import asyncio
+
 from mas import game_state as gsx
 from mas.agents.worker_base import Worker, run_worker
 from mas.mcp_game import GameError
@@ -23,7 +26,62 @@ class TradingAgent(Worker):
         'sell_and_complete': 'Dock, complete satisfied missions, sell surplus cargo. params: keep_items?, min_price?, sell?',
         'list_item': 'Create a sell order. params: item_id, quantity, price_each',
         'explore_adjacent': 'Jump to nearest neighbouring system and back. params: max_distance, return_home',
+        'relocate': 'Move the pilot\'s operating base to an adjacent system (one jump) and dock there. '
+                    'params: target_system',
     }
+
+    async def jump_to(self, ops: PilotOps, target: str, step: str) -> dict:
+        """One validated jump with an idempotent ledger step; waits until the game confirms arrival."""
+        st = await ops.status()
+        if st['system'] == target:
+            return st
+        st = await ops.ensure_fuel(st, max(self.cfg['limits']['min_fuel_fraction'], 0.5))
+
+        async def rec(pre):
+            return (await ops.status())['system'] == target
+        await ops.mutate(step, 'jump', reconcile=rec, id=target)
+        for _ in range(30):  # a jump can leave the ship in transit for a few ticks
+            st = await ops.status()
+            if st['system'] == target and not st.get('in_transit'):
+                break
+            await asyncio.sleep(10)
+        if st['system'] != target:
+            raise GameError('jump_unconfirmed', f'expected {target}, at {st["system"]}')
+        ops.log('game.confirmed', what='jumped', system=target, fuel_frac=round(st['fuel_frac'], 2),
+                distance_stat=st['stats'].get('distance_traveled'))
+        return st
+
+    async def skill_relocate(self, ops: PilotOps, params: dict, progress) -> dict:
+        target = params.get('target_system')
+        st = await ops.status()
+        origin = st['system']
+        if not target:
+            return {'ok': False, 'error': 'invalid_params', 'detail': 'target_system required'}
+        if st['system'] != target:
+            system = await ops.system()
+            conn = next((c for c in system['connections'] if c['system_id'] == target), None)
+            if not conn:
+                return {'ok': False, 'error': 'not_adjacent', 'detail': f'{target} is not connected to {origin}',
+                        'connections': [c['system_id'] for c in system['connections']]}
+            await progress(f'relocating {origin} -> {target}')
+            st = await self.jump_to(ops, target, f'jump:relocate:{target}')
+        visited = await ops.system()
+        report = {'system': visited['id'], 'name': visited['name'], 'police_level': visited['police_level'],
+                  'bases': [p['id'] for p in visited['pois'] if p['has_base']],
+                  'belts': [p['id'] for p in visited['pois'] if gsx.is_belt(p)],
+                  'connections': [(c['system_id'], c['distance']) for c in visited['connections']]}
+        ops.log('explore.report', report=report)
+        if self.cfg['safety'].get('explore_requires_police') and gsx.unsafe_security(visited['police_level']):
+            ops.log('safety.unsafe_system', system=target, police=visited['police_level'], recovery='jump back')
+            st = await self.jump_to(ops, origin, f'jump:back:{origin}')
+            st = await ops.go_to_base_and_dock('after_unsafe_relocate')
+            return {'ok': False, 'error': 'unsafe_system', 'explored': report, 'system': st['system']}
+        if not report['bases']:
+            return {'ok': True, 'summary': f'relocated to {target} (no station; not docked)', 'explored': report,
+                    'system': target, 'docked': False, 'stats': st['stats']}
+        st = await ops.go_to_base_and_dock(f'relocate:{target}')
+        return {'ok': True, 'summary': f'relocated {origin} -> {target}, docked at {st["docked_at"]}',
+                'explored': report, 'system': st['system'], 'docked': st['docked'], 'stats': st['stats']}
 
     async def skill_accept_mission(self, ops: PilotOps, params: dict, progress) -> dict:
         mission_id = params.get('mission_id')
@@ -169,7 +227,7 @@ class TradingAgent(Worker):
         visited = await ops.system()
         report = {'system': visited['id'], 'name': visited['name'], 'police_level': visited['police_level'],
                   'bases': [p['name'] for p in visited['pois'] if p['has_base']], 'belts': [p['name'] for p in visited['pois'] if gsx.is_belt(p)]}
-        unsafe = self.cfg['safety'].get('explore_requires_police') and visited['police_level'] == 0
+        unsafe = self.cfg['safety'].get('explore_requires_police') and gsx.unsafe_security(visited['police_level'])
         if params.get('return_home', True) or unsafe:
             if st['system'] != origin:
                 st = await ops.ensure_fuel(st, 0.0)
@@ -179,6 +237,8 @@ class TradingAgent(Worker):
                 await ops.mutate(f'jump:back:{origin}', 'jump', reconcile=rec_back, id=origin)
                 st = await ops.status()
             st = await ops.go_to_base_and_dock('after_explore')
+        elif any(p['has_base'] for p in visited['pois']):
+            st = await ops.go_to_base_and_dock('explore_stay')
         return {'ok': True, 'summary': f'explored {report["system"]}, now at {st["system"]}', 'explored': report,
                 'unsafe_police_level': unsafe, 'docked': st['docked'], 'stats': st['stats']}
 

@@ -41,7 +41,7 @@
     "min_fuel_fraction": 0.25,
     "min_hull_fraction": 0.5,
     "min_sell_price": 1,
-    "max_active_missions_per_pilot": 2,
+    "max_active_missions_per_pilot": 4,
     "max_observation_age_seconds": 120,
     "a2a_timeout_seconds": 2400,
     "mcp_call_timeout_seconds": 600,

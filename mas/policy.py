@@ -8,6 +8,7 @@ SKILL_AGENT = {
     'sell_and_complete': 'trading',
     'list_item': 'trading',
     'explore_adjacent': 'trading',
+    'relocate': 'trading',
     'wait': None,
 }
 STAT_FIELDS = ('credits_earned', 'credits_spent', 'ore_mined', 'trades_completed',
@@ -58,12 +59,34 @@ def allowances(progress: dict, cfg: dict) -> dict:
             'distance_left': max(0, lim['distance_soft_cap'] - tot['distance_traveled'])}
 
 
+def relocation_target(pilot: str, obs: dict, o: dict, al: dict, scouting: set) -> tuple[str | None, str]:
+    """Where should a pilot with no usable belt go? Follow a proven system, else wait for a scout, else scout."""
+    here = o['status'].get('system')
+    yields = o.get('system_yield') or {}
+    exhausted = set(o.get('exhausted_systems') or [])
+    conns = {c['system_id']: c.get('distance') for c in o.get('connections') or [] if c.get('system_id')}
+    for other, oo in obs.items():
+        there = ((oo or {}).get('status') or {}).get('system')
+        if other != pilot and there and there != here and yields.get(there, 0) > 0                 and there in conns and (conns[there] or 0) <= al['distance_left']:
+            return there, f'follow {other}: {there} yielded {yields[there]} ore'
+    for other, oo in obs.items():
+        there = ((oo or {}).get('status') or {}).get('system')
+        if other != pilot and there and there != here and there not in exhausted and not yields.get(there):
+            return None, f'wait: {other} is scouting {there}'
+    if scouting:
+        return None, f'wait: scout already sent to {sorted(scouting)}'
+    options = sorted((d, s) for s, d in conns.items() if s not in exhausted and d and d <= al['distance_left'])
+    if options:
+        return options[0][1], f'scout nearest non-exhausted neighbour {options[0][1]} ({options[0][0]} away)'
+    return None, 'no affordable neighbour left within the distance budget'
+
+
 def fallback_plan(obs: dict[str, dict], progress: dict, cfg: dict, history: list[dict]) -> dict:
     """Rule-based policy: used when the LLM is unavailable/over budget or returns an invalid plan."""
     al = allowances(progress, cfg)
     explored_needed = not progress['met']['systems_explored']
     explore_done = any(h['skill'] == 'explore_adjacent' and h['status'] == 'completed' for h in history)
-    assignments, reasons, taken = [], [], set()
+    assignments, reasons, taken, scouting = [], [], set(), set()
     for pilot, o in obs.items():
         if not o:
             continue
@@ -84,6 +107,13 @@ def fallback_plan(obs: dict[str, dict], progress: dict, cfg: dict, history: list
                 (cargo_frac >= 0.5 or not active or any(_satisfied(m, st) for m in active)):
             assignments.append({'pilot': pilot, 'skill': 'sell_and_complete', 'params': {}})
             reasons.append(f'{pilot}: docked with cargo -> complete missions / sell')
+        elif st['docked'] and 'belts_ok' in o and not o['belts_ok']:
+            # every belt here is known depleted: mining is impossible, so move the operating base
+            target, why = relocation_target(pilot, obs, o, al, scouting)
+            if target:
+                scouting.add(target)
+                assignments.append({'pilot': pilot, 'skill': 'relocate', 'params': {'target_system': target}})
+            reasons.append(f'{pilot}: belts depleted in {st.get("system")} -> {why}')
         elif st['docked'] and cands and len(active) < cfg['limits']['max_active_missions_per_pilot'] and \
                 not any(h['skill'] == 'accept_mission' and h['pilot'] == pilot for h in recent_fail[:2]):
             assignments.append({'pilot': pilot, 'skill': 'accept_mission', 'params': {'mission_id': cands[0]['id']}})
@@ -100,7 +130,8 @@ def fallback_plan(obs: dict[str, dict], progress: dict, cfg: dict, history: list
             target = next((ob.get('item_id') for m in active for ob in m['objectives'] if ob.get('item_id')), None)
             assignments.append({'pilot': pilot, 'skill': 'mine_cycle',
                                 'params': {'max_mining_actions': cfg['limits']['max_mining_actions_per_cycle'],
-                                           'target_item': target, 'return_to_base': True}})
+                                           'target_item': target, 'return_to_base': True,
+                                           'avoid_belts': o.get('depleted_belts_here') or []}})
             reasons.append(f'{pilot}: mine (ore {progress["totals"]["ore_mined"]}/{cfg["targets"]["ore_mined"]})')
     return {'rationale': '; '.join(reasons), 'assignments': assignments}
 
@@ -135,6 +166,9 @@ def validate_plan(plan: dict, obs: dict, cfg: dict, progress: dict) -> tuple[lis
             continue
         st = obs[pilot]['status']
         if skill == 'accept_mission':
+            if len(obs[pilot].get('active_missions') or []) >= cfg['limits']['max_active_missions_per_pilot']:
+                problems.append(f'{pilot} already has the maximum number of active missions')
+                continue
             ids = {m['id'] for m in obs[pilot].get('available_missions') or []}
             if params.get('mission_id') not in ids:
                 problems.append(f'mission {params.get("mission_id")!r} not in fresh observation for {pilot}')
@@ -154,7 +188,25 @@ def validate_plan(plan: dict, obs: dict, cfg: dict, progress: dict) -> tuple[lis
                 problems.append('explore rejected: distance budget')
                 continue
             params['max_distance'] = min(float(params.get('max_distance', 400)), al['distance_left'] / 2)
+        if skill == 'relocate':
+            o = obs[pilot]
+            conns = {c['system_id']: c.get('distance') for c in o.get('connections') or []}
+            target = params.get('target_system')
+            if target not in conns:
+                problems.append(f'relocate rejected: {target!r} is not adjacent to {st.get("system")}')
+                continue
+            if (conns[target] or 0) > al['distance_left']:
+                problems.append(f'relocate rejected: {target} ({conns[target]}) exceeds distance budget {al["distance_left"]}')
+                continue
+            if target in (o.get('exhausted_systems') or []):
+                problems.append(f'relocate rejected: belts in {target} are known depleted')
+                continue
+            params = {'target_system': target}
         if skill == 'mine_cycle':
+            if 'belts_ok' in obs[pilot] and not obs[pilot]['belts_ok']:
+                problems.append(f'mine_cycle rejected: every belt in {st.get("system")} is known depleted')
+                continue
+            params['avoid_belts'] = obs[pilot].get('depleted_belts_here') or []
             params['max_mining_actions'] = int(min(params.get('max_mining_actions', 20),
                                                    cfg['limits']['max_mining_actions_per_cycle']))
             if st['cargo_capacity'] and st['cargo_free'] <= 0:

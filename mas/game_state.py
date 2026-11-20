@@ -182,6 +182,15 @@ def parse_poi(data: dict) -> dict:
                            'remaining': num(r.get('remaining'))} for r in res if isinstance(r, dict)]}
 
 
+def unsafe_security(level) -> bool:
+    """Security level as a number (JSON servers: 0 = no police) or text (live: 'Maximum Security ...')."""
+    if level is None:
+        return False
+    if isinstance(level, (int, float)) and not isinstance(level, bool):
+        return level <= 0
+    return bool(re.search(r'lawless|no security|unpoliced|anarch|pirate|none', str(level), re.I))
+
+
 def is_belt(poi: dict) -> bool:
     t = f"{poi.get('type', '')} {poi.get('name', '')}".lower()
     return any(w in t for w in BELT_WORDS)

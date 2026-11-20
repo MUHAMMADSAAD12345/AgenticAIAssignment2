@@ -32,11 +32,17 @@ SYSTEMS = {
                                      {'system_id': 'drift', 'name': 'Drift', 'distance': 300}]},
     'veil': {'id': 'veil', 'name': 'Veil', 'empire': 'nebula', 'police_level': 2,
              'pois': [{'id': 'veil_station', 'name': 'Veil Port', 'type': 'station', 'position': {'x': 0, 'y': 0},
-                       'has_base': True, 'base_id': 'veil_base'}],
+                       'has_base': True, 'base_id': 'veil_base'},
+                      {'id': 'veil_belt', 'name': 'Veil Belt', 'type': 'asteroid_belt', 'position': {'x': 20, 'y': 10},
+                       'has_base': False}],
              'connections': [{'system_id': 'nebula_prime', 'name': 'Nebula Prime', 'distance': 120}]},
 }
 JUMP_ENTRY = {'veil': 'veil_station', 'nebula_prime': 'nebula_station'}
-DEPOSITS = {'nebula_belt': {'iron_ore': 60, 'copper_ore': 40}, 'nebula_outer': {'iron_ore': 200}}
+DEPOSITS = {'nebula_belt': {'iron_ore': 60, 'copper_ore': 40}, 'nebula_outer': {'iron_ore': 200},
+            'veil_belt': {'iron_ore': 300, 'copper_ore': 120}}
+if os.environ.get('MOCK_DEPLETED_HOME') == '1':  # scenario: home belts mined out (as on the live server)
+    DEPOSITS['nebula_belt'] = {'iron_ore': 0, 'copper_ore': 0}
+    DEPOSITS['nebula_outer'] = {'iron_ore': 0}
 BIDS = {'iron_ore': 5, 'copper_ore': 8}
 MISSIONS = [
     {'mission_id': 'msn_iron_30', 'template_id': 'iron_supply', 'title': 'Iron Supply Run', 'type': 'mining',
