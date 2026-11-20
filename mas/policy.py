@@ -107,6 +107,11 @@ def fallback_plan(obs: dict[str, dict], progress: dict, cfg: dict, history: list
                 (cargo_frac >= 0.5 or not active or any(_satisfied(m, st) for m in active)):
             assignments.append({'pilot': pilot, 'skill': 'sell_and_complete', 'params': {}})
             reasons.append(f'{pilot}: docked with cargo -> complete missions / sell')
+        elif 'belts_ok' in o and not o['belts_ok'] and any(not k.startswith('fuel') for k in st['cargo']) and \
+                not any(h['skill'] == 'sell_and_complete' and h['pilot'] == pilot for h in history[:2]):
+            # cannot mine here but holding cargo: dock at the local station and sell the surplus (keeps mission ore)
+            assignments.append({'pilot': pilot, 'skill': 'sell_and_complete', 'params': {}})
+            reasons.append(f'{pilot}: no usable belt in {st.get("system")} -> dock and sell surplus cargo here')
         elif st['docked'] and 'belts_ok' in o and not o['belts_ok']:
             # every belt here is known depleted: mining is impossible, so move the operating base
             target, why = relocation_target(pilot, obs, o, al, scouting)
