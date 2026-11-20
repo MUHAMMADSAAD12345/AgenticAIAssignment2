@@ -11,7 +11,7 @@ be able to walk through their files line by line and explain the other person's 
 
 ## Task flow (one cycle)
 
-1. Coordinator creates task `G01-c0007-A-observe-<ts>` and sends it over A2A JSON-RPC to the trading agent.
+1. Coordinator creates task `MenInBlack-c0007-A-observe-<ts>` and sends it over A2A JSON-RPC to the trading agent.
 2. Trading agent opens an MCP session for pilot A: `initialize` -> `list_tools` -> `spacemolt_auth login`,
    then free queries `get_status`, `get_system`, `get_active_missions`, `get_missions`, `view_market`.
    The result goes back as a JSON artifact on the A2A task.

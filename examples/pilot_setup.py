@@ -3,9 +3,9 @@ Registration and status are setup activities, not assessed autonomous gameplay.
 Game-playing agents must implement authenticated MCP themselves.
 
 Examples:
- python examples/pilot_setup.py register --username GROUP01-A --empire nebula
- python examples/pilot_setup.py register --username GROUP01-B --empire nebula
- python examples/pilot_setup.py status --username GROUP01-A
+ python examples/pilot_setup.py register --username MenInBlack-P1 --empire nebula
+ python examples/pilot_setup.py register --username MenInBlack-P2 --empire nebula
+ python examples/pilot_setup.py status --username MenInBlack-P1
 
 IMPORTANT: Registration creates a permanent account. Do not repeat once successful.
 """

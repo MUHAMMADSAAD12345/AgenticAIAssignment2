@@ -85,7 +85,7 @@
   <rect class="ext" x="320" y="540" width="360" height="72" rx="10"/>
   <text class="t" x="500" y="562" text-anchor="middle">SpaceMolt MCP v2 server</text>
   <text class="s" x="500" y="581" text-anchor="middle">game.spacemolt.com/mcp/v2 (spacemolt, spacemolt_auth,</text>
-  <text class="s" x="500" y="598" text-anchor="middle">spacemolt_market ...) pilots AI26-Gxx-A / -B, nebula</text>
+  <text class="s" x="500" y="598" text-anchor="middle">spacemolt_market ...) pilots MenInBlack-P1 / -P2, nebula</text>
 
   <path class="e" d="M300,430 L420,538" marker-end="url(#a)"/>
   <path class="e" d="M700,430 L580,538" marker-end="url(#a)"/>

@@ -1,8 +1,8 @@
 {
-  "group_id": "AI26-G01",
+  "group_id": "MenInBlack",
   "pilots": {
-    "A": "AI26-G01-A",
-    "B": "AI26-G01-B"
+    "A": "MenInBlack-P1",
+    "B": "MenInBlack-P2"
   },
   "starting_empire": "nebula",
   "mcp_endpoint": "https://game.spacemolt.com/mcp/v2",

@@ -1,6 +1,6 @@
 {
-  "group_id": "AI26-G01",
-  "pilot_usernames": ["AI26-G01-A", "AI26-G01-B"],
+  "group_id": "MenInBlack",
+  "pilot_usernames": ["MenInBlack-P1", "MenInBlack-P2"],
   "starting_empire": "nebula",
   "llm_model_example": "openai/gpt-oss-20b",
   "mcp_endpoint": "https://game.spacemolt.com/mcp/v2",

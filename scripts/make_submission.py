@@ -1,7 +1,7 @@
 """Build the submission bundle: LLM usage summary, runtime summary, baseline comparison,
 re-scrubbed logs, and a ZIP of the source without venv/secrets.
 
-Usage: python -m scripts.make_submission --group AI26-G01
+Usage: python -m scripts.make_submission --group MenInBlack
 """
 from __future__ import annotations
 import argparse
@@ -72,7 +72,7 @@ def scrub_file(src: Path, dst: Path):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--group', default='AI26-Gxx')
+    p.add_argument('--group', default='MenInBlack')
     a = p.parse_args()
     sub = ROOT / 'submission'
     if sub.exists():

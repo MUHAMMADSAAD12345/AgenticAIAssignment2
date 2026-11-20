@@ -22,13 +22,13 @@ If `py -3.11` is unavailable, `python -m venv .venv` works with Python 3.11+. If
 
 ## 3. Create two fresh SpaceMolt pilots
 - Visit https://spacemolt.com/dashboard and obtain a registration code.
-- Choose unique names such as `AI26-G01-A` and `AI26-G01-B`. **Replace G01 with your assigned group ID.**
+- Choose unique names such as `MenInBlack-P1` and `MenInBlack-P2`. Both use the team identifier `MenInBlack` (instructor naming rule: `<TeamID>-P1`, `<TeamID>-P2`).
 - Register the two pilots using the website client or optional HTTP bootstrap helper. Example:
 
 ```cmd
-python examples\pilot_setup.py register --username AI26-G01-A --empire nebula
-python examples\pilot_setup.py register --username AI26-G01-B --empire nebula
-python examples\pilot_setup.py status --username AI26-G01-A
+python examples\pilot_setup.py register --username MenInBlack-P1 --empire nebula
+python examples\pilot_setup.py register --username MenInBlack-P2 --empire nebula
+python examples\pilot_setup.py status --username MenInBlack-P1
 ```
 
 The registration code is only for account creation. The helper stores the generated pilot password in Windows Credential Manager through `keyring`; it does not print secrets. `register` permanently creates a pilot, so never blindly retry if the server response is ambiguous. **This HTTP helper is for account setup only; your assessed gameplay must use MCP.** If registration or session details change, use current official https://spacemolt.com/docs/getting-started .

@@ -50,19 +50,19 @@ Read this once before registering anything.
 
 ### 3.1 Choose the names
 
-| Pilot | Example (group 07) | Used for |
+| Pilot | Username | Used for |
 |---|---|---|
-| Practice | `G07-practice-ali` | testing on the real server and the baseline run. Does **not** count. |
-| Competition A | `AI26-G07-A` | scored |
-| Competition B | `AI26-G07-B` | scored |
+| Practice | `MIB-practice` | testing on the real server and the baseline run. Does **not** count. |
+| Competition A | `MenInBlack-P1` | scored |
+| Competition B | `MenInBlack-P2` | scored |
 
-Use your real group number in place of `07`. Keep the practice name clearly different from the
-`AI26-Gxx-A/B` pattern so nobody confuses it with a scored pilot. All three use the `nebula` empire.
+Team identifier: `MenInBlack`. Keep the practice name clearly different from the
+`MenInBlack-P1/P2` pattern so nobody confuses it with a scored pilot. All three use the `nebula` empire.
 
 ### 3.2 Register the practice pilot first
 
 ```cmd
-python examples\pilot_setup.py register --username G07-practice-ali --empire nebula
+python examples\pilot_setup.py register --username MIB-practice --empire nebula
 ```
 
 What you will see:
@@ -70,15 +70,15 @@ What you will see:
 1. `Get registration code from https://spacemolt.com/dashboard` and a reminder line.
 2. `Registration code (hidden):` Paste the code and press Enter. In CMD you paste with **right-click**
    (or Ctrl+V on Windows 10/11). **Nothing appears while you paste**; that is normal.
-3. Success: `[PASS] Registered G07-practice-ali (nebula); password saved to Windows Credential Manager`.
+3. Success: `[PASS] Registered MIB-practice (nebula); password saved to Windows Credential Manager`.
 
 ### 3.3 Register the two competition pilots
 
 Only after the practice pilot works:
 
 ```cmd
-python examples\pilot_setup.py register --username AI26-G07-A --empire nebula
-python examples\pilot_setup.py register --username AI26-G07-B --empire nebula
+python examples\pilot_setup.py register --username MenInBlack-P1 --empire nebula
+python examples\pilot_setup.py register --username MenInBlack-P2 --empire nebula
 ```
 
 Each must print its own `[PASS] Registered ...` line.
@@ -97,13 +97,13 @@ Each must print its own `[PASS] Registered ...` line.
 ### 3.5 Verify each pilot (read-only)
 
 ```cmd
-python examples\pilot_setup.py status --username G07-practice-ali
-python examples\pilot_setup.py status --username AI26-G07-A
-python examples\pilot_setup.py status --username AI26-G07-B
+python examples\pilot_setup.py status --username MIB-practice
+python examples\pilot_setup.py status --username MenInBlack-P1
+python examples\pilot_setup.py status --username MenInBlack-P2
 ```
 
 Expected: `[PASS] Authenticated pilot: ...`, then credits, home system, and `Ore mined: 0`
-(new pilots must start at 0). Also open `https://spacemolt.com/player/AI26-G07-A` and `...-B` in a
+(new pilots must start at 0). Also open `https://spacemolt.com/player/MenInBlack-P1` and `...-P2` in a
 browser: the profile exists, shows the Nebula empire, and all Service Record counters are 0.
 
 If `status` asks `Existing pilot password (hidden):`, the password is not in Credential Manager on this
@@ -113,7 +113,7 @@ PC (for example, you registered in the website client). Paste the password, then
 Optional check without showing the password (prints `True` or `False`):
 
 ```cmd
-python -c "import keyring; print(bool(keyring.get_password('spacemolt-course-test','AI26-G07-A')))"
+python -c "import keyring; print(bool(keyring.get_password('spacemolt-course-test','MenInBlack-P1')))"
 ```
 
 ### 3.6 Back up the passwords, and use one PC for the run
@@ -122,14 +122,14 @@ The password exists only in Credential Manager on the PC you registered from. Ba
 password manager (Bitwarden, 1Password, your browser's vault) without showing it on screen:
 
 ```cmd
-python -c "import keyring; print(keyring.get_password('spacemolt-course-test','AI26-G07-A'), end='')" | clip
+python -c "import keyring; print(keyring.get_password('spacemolt-course-test','MenInBlack-P1'), end='')" | clip
 ```
 
 This copies it to the clipboard. Paste it into the password manager, then copy something else to
 clear the clipboard. Repeat for `-B` and the practice pilot.
 
 If student 1 registered `-A` on laptop 1 and student 2 registered `-B` on laptop 2, choose one
-laptop for the MAS. On that laptop, run `python examples\pilot_setup.py status --username AI26-G07-B`,
+laptop for the MAS. On that laptop, run `python examples\pilot_setup.py status --username MenInBlack-P2`,
 paste the password at the hidden prompt and answer `y`. Move it only through a password manager's
 share feature or by typing it yourself. Never send it over WhatsApp or email, and never put it in a file.
 
@@ -146,20 +146,20 @@ copy config.example.json config.json
 notepad config.json
 ```
 
-Change only the top lines. Example for group 07:
+Change only the top lines (already set for team `MenInBlack` in `config.example.json`):
 
 ```json
 {
-  "group_id": "AI26-G07",
+  "group_id": "MenInBlack",
   "pilots": {
-    "A": "AI26-G07-A",
-    "B": "AI26-G07-B"
+    "A": "MenInBlack-P1",
+    "B": "MenInBlack-P2"
   },
   "starting_empire": "nebula",
   ...
 ```
 
-* `group_id` prefixes every task id in the logs (e.g. `AI26-G07-c0003-A-mine_cycle`).
+* `group_id` prefixes every task id in the logs (e.g. `MenInBlack-c0003-A-mine_cycle`).
 * The names in `pilots` must match the registered usernames **exactly** (same capitals).
 * Keep the quotes and commas exactly as they are. Do not add a comma after the last item in a `{ }` block.
 * Never put passwords or keys in this file. It is included in the submission.
@@ -172,7 +172,7 @@ Save (Ctrl+S) and check that it loads:
 python -c "from mas import config; c=config.load(); print(c['group_id'], c['pilots'])"
 ```
 
-Expected: `AI26-G07 {'A': 'AI26-G07-A', 'B': 'AI26-G07-B'}`. A `JSONDecodeError ... line N` means a
+Expected: `MenInBlack {'A': 'MenInBlack-P1', 'B': 'MenInBlack-P2'}`. A `JSONDecodeError ... line N` means a
 typo on line N (usually a missing quote or a stray comma).
 
 ### 3b.2 Practice config (keeps practice separate)
@@ -181,8 +181,8 @@ Create `config.practice.json` with only the practice pilot:
 
 ```json
 {
-  "group_id": "AI26-G07-PRACTICE",
-  "pilots": { "A": "G07-practice-ali" }
+  "group_id": "MIB-PRACTICE",
+  "pilots": { "A": "MIB-practice" }
 }
 ```
 
@@ -192,7 +192,7 @@ budget, and never add `--assessed`:
 ```cmd
 set MAS_LOGS=logs_practice
 python -m scripts.live_check --config config.practice.json
-python -m baseline.single_agent --username G07-practice-ali --minutes 30
+python -m baseline.single_agent --username MIB-practice --minutes 30
 ```
 
 To try the full MAS on the practice pilot, open three windows, run `set MAS_LOGS=logs_practice` in each,
@@ -239,7 +239,7 @@ I could not reach the game server from my environment, so this check is the one 
    Three windows open: mining agent, trading agent, coordinator (`--assessed`). It stops by itself when the
    combined targets are met. To stop early, press Ctrl+C in the coordinator window; restart with the same
    command and it resumes.
-3. While it runs, check both public profiles at `https://spacemolt.com/player/AI26-Gxx-A` and `...-B`.
+3. While it runs, check both public profiles at `https://spacemolt.com/player/MenInBlack-P1` and `...-P2`.
    If the stats there disagree with the coordinator's `progress` events, trust the profile and stop with Ctrl+C.
 4. After the run:
    ```cmd
@@ -284,10 +284,10 @@ Also update the AI-assistant disclosure line at the end of `README.md` if needed
 ## 10. Submit
 
 ```cmd
-python -m scripts.make_submission --group AI26-Gxx
+python -m scripts.make_submission --group MenInBlack
 ```
 
-Before uploading `AI26-Gxx_submission.zip`, open it and search for your passwords, the registration code
+Before uploading `MenInBlack_submission.zip`, open it and search for your passwords, the registration code
 and `gsk_`. Nothing should match. Add the two profile URLs (and any exchange-sale screenshot) to your
 submission message.
 

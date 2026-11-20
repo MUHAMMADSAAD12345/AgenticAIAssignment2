@@ -83,7 +83,7 @@ def serve(agent: str, description: str, port: int, skills: list[tuple[str, str]]
         supported_interfaces=[AgentInterface(protocol_binding='JSONRPC', url=url, protocol_version='1.0')],
         skills=[AgentSkill(id=sid, name=sid.replace('_', ' ').title(), description=desc,
                            input_modes=['application/json'], output_modes=['application/json'],
-                           tags=['spacemolt', agent], examples=[json.dumps({'mission_id': 'G01-c1-A-' + sid, 'skill': sid,
+                           tags=['spacemolt', agent], examples=[json.dumps({'mission_id': 'MenInBlack-c1-A-' + sid, 'skill': sid,
                                                                             'pilot': 'A', 'params': {}})])
                 for sid, desc in skills])
     h = DefaultRequestHandler(agent_executor=JsonTaskExecutor(agent, handler), task_store=InMemoryTaskStore(), agent_card=card)

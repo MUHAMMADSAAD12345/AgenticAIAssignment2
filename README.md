@@ -37,11 +37,15 @@ The mock (`tests/mock_spacemolt_server.py`) is a test double only. It is never u
 ## 2. Configure
 
 ```cmd
-copy config.example.json config.json
+copy config.example.json config.json   (only if config.json is missing)
 notepad config.json
 ```
 
-Set `group_id` and `pilots.A` / `pilots.B` to your real pilot names (`AI26-Gxx-A`, `AI26-Gxx-B`).
+`config.json` is already set for our team: `group_id` = `MenInBlack`, pilots `MenInBlack-P1` (A) and
+`MenInBlack-P2` (B), both in the `nebula` empire. Per the instructor's naming rule (both pilots share the
+team identifier, `<TeamID>-P1` / `<TeamID>-P2`), this replaces the `AI26-Gxx-A/B` pattern in the assignment PDF.
+
+Pilot profiles: https://spacemolt.com/player/MenInBlack-P1 and https://spacemolt.com/player/MenInBlack-P2
 Everything else has safe defaults (spend and distance soft caps, fuel and hull floors, mining caps).
 
 Secrets never go in files:
@@ -136,11 +140,11 @@ so the comparison isolates the architecture.
 ## 9. Submission bundle
 
 ```cmd
-python -m scripts.make_submission --group AI26-Gxx
+python -m scripts.make_submission --group MenInBlack
 ```
 
 Writes `submission\` (LLM usage summary, runtime summary, baseline comparison, re-scrubbed logs) and
-`AI26-Gxx_submission.zip` (source without `.venv`, `.env` or raw logs).
+`MenInBlack_submission.zip` (source without `.venv`, `.env` or raw logs).
 
 ## 10. Files
 

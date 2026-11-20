@@ -1,7 +1,7 @@
 # SpaceMolt MAS: report
 
-Group: **AI26-Gxx** (FILL IN) | Members: FILL IN (Student 1), FILL IN (Student 2)
-Pilots: `https://spacemolt.com/player/AI26-Gxx-A`, `https://spacemolt.com/player/AI26-Gxx-B` (FILL IN)
+Group: **MenInBlack** | Members: FILL IN (Student 1), FILL IN (Student 2)
+Pilots: `https://spacemolt.com/player/MenInBlack-P1`, `https://spacemolt.com/player/MenInBlack-P2`
 
 ## 1. Strategy
 
