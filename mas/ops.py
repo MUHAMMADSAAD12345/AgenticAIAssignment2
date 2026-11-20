@@ -1,0 +1,189 @@
+"""Safe, idempotent pilot operations built on GameSession.
+
+Each state-changing step has a deterministic key (mission_id:step). The worker's
+SQLite ledger records 'sent' before the MCP call and 'confirmed' after the game
+replies. On restart, confirmed steps are skipped and 'sent' steps with no reply
+are reconciled against fresh game state, so a sale is never replayed blindly.
+"""
+from __future__ import annotations
+from mas import game_state as gsx
+from mas.log import event
+from mas.mcp_game import GameError, GameSession, UnknownOutcome
+from mas.store import Store
+
+
+class SafetyStop(Exception):
+    pass
+
+
+class PilotOps:
+    def __init__(self, gs: GameSession, store: Store, mission_id: str, agent: str, cfg: dict, params: dict):
+        self.gs, self.store, self.mid, self.agent, self.cfg = gs, store, mission_id, agent, cfg
+        self.limits, self.safety = cfg['limits'], cfg['safety']
+        self.params = params
+        self.spend_allowance = float(params.get('spend_allowance', self.limits['spend_soft_cap']))
+        self.spent_here = 0.0
+        self.notes: list[str] = []
+
+    def log(self, name, **data):
+        event(name, agent=self.agent, task_id=self.mid, pilot=self.gs.pilot_key, **data)
+
+    # observations (free queries)
+    async def status(self) -> dict:
+        return gsx.parse_status(await self.gs.call('get_status'))
+
+    async def system(self) -> dict:
+        return gsx.parse_system(await self.gs.call('get_system'))
+
+    async def poi(self) -> dict:
+        return gsx.parse_poi(await self.gs.call('get_poi'))
+
+    async def missions_available(self) -> list[dict]:
+        try:
+            return gsx.parse_missions(await self.gs.call('get_missions'))
+        except GameError as e:
+            self.log('observe.missions_unavailable', code=e.code)
+            return []
+
+    async def missions_active(self) -> list[dict]:
+        """Active missions from the game; falls back to missions this worker accepted (kept in SQLite)."""
+        remembered = self.store.kv_get(f'accepted:{self.gs.pilot_key}', {}) or {}
+        try:
+            live = gsx.parse_missions(await self.gs.call('get_active_missions'))
+        except GameError as e:
+            self.log('observe.active_missions_unavailable', code=e.code, fallback='remembered accepted missions')
+            return list(remembered.values())
+        live_ids = {m['id'] for m in live}
+        stale = [k for k in remembered if k not in live_ids]
+        if stale:
+            for k in stale:
+                remembered.pop(k)
+            self.store.kv_set(f'accepted:{self.gs.pilot_key}', remembered)
+        return live
+
+    def remember_mission(self, m: dict, done: bool = False):
+        key = f'accepted:{self.gs.pilot_key}'
+        rem = self.store.kv_get(key, {}) or {}
+        if done:
+            rem.pop(m['id'], None)
+        else:
+            rem[m['id']] = m
+        self.store.kv_set(key, rem)
+
+    async def market(self) -> dict:
+        try:
+            return gsx.parse_market(await self.gs.call('view_market'))
+        except GameError as e:
+            self.log('observe.market_unavailable', code=e.code)
+            return {}
+
+    async def snapshot(self) -> dict:
+        s = await self.status()
+        return {k: s[k] for k in ('credits', 'system', 'poi', 'docked', 'docked_at', 'fuel', 'cargo', 'cargo_used')}
+
+    # idempotent mutation
+    async def mutate(self, step: str, action: str, reconcile=None, **params) -> dict:
+        key = f'{self.mid}:{step}'
+        rec = self.store.action_get(key)
+        if rec and rec['status'] == 'confirmed':
+            self.log('idempotency.skip', step=step, action=action, reason='already confirmed in ledger')
+            return rec['response'] or {}
+        if rec and rec['status'] in ('sent', 'unknown') and reconcile:
+            happened = await reconcile(rec['pre_state'] or {})
+            self.log('recovery.reconcile', step=step, action=action, happened=happened)
+            if happened:
+                self.store.action_done(key, 'confirmed', {'reconciled': True})
+                return {'reconciled': True}
+        pre = await self.snapshot()
+        self.store.action_sent(key, self.mid, self.gs.pilot_key, self.gs.tool_for(action), action, params, pre)
+        try:
+            resp = await self.gs.call(action, **params)
+        except UnknownOutcome:
+            self.store.action_done(key, 'unknown', error='reply lost')
+            if reconcile and await reconcile(pre):
+                self.store.action_done(key, 'confirmed', {'reconciled': True})
+                self.log('recovery.reconcile', step=step, action=action, happened=True)
+                return {'reconciled': True}
+            raise
+        except GameError as e:
+            self.store.action_done(key, 'failed', error=f'{e.code}: {e.message[:200]}')
+            raise
+        slim = {k: v for k, v in resp.items() if k != '_text' and not isinstance(v, (list, dict))}
+        slim['text'] = (resp.get('_text') or '')[:300]
+        self.store.action_done(key, 'confirmed', slim)
+        return resp
+
+    # safety gates
+    async def ensure_fuel(self, st: dict, need_frac: float | None = None):
+        need = need_frac if need_frac is not None else self.limits['min_fuel_fraction']
+        if st['fuel_frac'] >= need:
+            return st
+        if st['docked'] and self.safety.get('allow_refuel', True):
+            if self.spent_here >= self.spend_allowance:
+                raise SafetyStop(f'fuel {st["fuel_frac"]:.0%} low and spend allowance exhausted')
+            before = st['credits']
+            await self.mutate(f'refuel:{st["system"]}:{st["poi"]}', 'refuel',
+                              reconcile=self._rec_fuel_up)
+            st = await self.status()
+            self.spent_here += max(0, before - st['credits'])
+            self.log('safety.refuelled', fuel_frac=round(st['fuel_frac'], 2), cost=before - st['credits'])
+            return st
+        raise SafetyStop(f'fuel {st["fuel_frac"]:.0%} below safety floor and not docked')
+
+    async def ensure_hull(self, st: dict):
+        if st['hull_frac'] >= self.limits['min_hull_fraction']:
+            return st
+        if st['docked'] and self.safety.get('allow_repair', True) and self.spent_here < self.spend_allowance:
+            before = st['credits']
+            await self.mutate(f'repair:{st["poi"]}', 'repair')
+            st = await self.status()
+            self.spent_here += max(0, before - st['credits'])
+            return st
+        raise SafetyStop(f'hull {st["hull_frac"]:.0%} below safety floor')
+
+    # movement
+    async def travel(self, poi_id: str, step: str, fuel_floor: float | None = None) -> dict:
+        st = await self.status()
+        if st['poi'] == poi_id:
+            return st
+        if fuel_floor is None:
+            st = await self.ensure_hull(st)
+        st = await self.ensure_fuel(st, fuel_floor)
+        await self.mutate(step, 'travel', reconcile=lambda pre: self._rec_at_poi(poi_id), id=poi_id)
+        st = await self.status()
+        if st['poi'] != poi_id:
+            raise GameError('travel_unconfirmed', f'expected {poi_id}, at {st["poi"]}')
+        self.log('game.confirmed', what='arrived', poi=poi_id, fuel_frac=round(st['fuel_frac'], 2))
+        return st
+
+    async def dock(self, step: str) -> dict:
+        st = await self.status()
+        if st['docked']:
+            return st
+        await self.mutate(step, 'dock', reconcile=self._rec_docked)
+        st = await self.status()
+        if not st['docked']:
+            raise GameError('dock_unconfirmed', 'still undocked after dock')
+        self.log('game.confirmed', what='docked', base=st['docked_at'])
+        return st
+
+    async def go_to_base_and_dock(self, tag: str) -> dict:
+        st = await self.status()
+        if st['docked']:
+            return st
+        system = await self.system()
+        base = gsx.base_poi(system, st)
+        if not base:
+            raise SafetyStop('no base found in current system')
+        await self.travel(base['id'], f'travel:base:{tag}', fuel_floor=0.0)
+        return await self.dock(f'dock:{tag}')
+
+    # reconcilers
+    async def _rec_at_poi(self, poi_id):
+        return (await self.status())['poi'] == poi_id
+
+    async def _rec_docked(self, pre):
+        return (await self.status())['docked']
+
+    async def _rec_fuel_up(self, pre):
+        return (await self.status())['fuel'] > (pre.get('fuel') or 0)

@@ -1,0 +1,59 @@
+{
+  "group_id": "AI26-G01",
+  "pilots": {
+    "A": "AI26-G01-A",
+    "B": "AI26-G01-B"
+  },
+  "starting_empire": "nebula",
+  "mcp_endpoint": "https://game.spacemolt.com/mcp/v2",
+  "keyring_service": "spacemolt-course-test",
+
+  "llm": {
+    "provider": "groq",
+    "model": "openai/gpt-oss-20b",
+    "max_completion_tokens": 700,
+    "plan_every_n_cycles": 2,
+    "reserve_requests": 10,
+    "reserve_tokens": 8000
+  },
+
+  "workers": {
+    "mining": "http://127.0.0.1:9999",
+    "trading": "http://127.0.0.1:9998"
+  },
+
+  "targets": {
+    "credits_earned": 2000,
+    "ore_mined": 30,
+    "trades": 1,
+    "systems_explored": 2,
+    "max_credits_spent": 1500,
+    "max_distance": 1500
+  },
+
+  "limits": {
+    "max_assessed_runtime_seconds": 28800,
+    "max_cycles": 200,
+    "stop_when_targets_met": true,
+    "spend_soft_cap": 1200,
+    "distance_soft_cap": 1300,
+    "max_mining_actions_per_cycle": 25,
+    "min_fuel_fraction": 0.25,
+    "min_hull_fraction": 0.5,
+    "min_sell_price": 1,
+    "max_active_missions_per_pilot": 2,
+    "max_observation_age_seconds": 120,
+    "a2a_timeout_seconds": 2400,
+    "mcp_call_timeout_seconds": 600,
+    "worker_retry_attempts": 3
+  },
+
+  "safety": {
+    "combat": false,
+    "external_transfers": false,
+    "buy_ships_or_modules": false,
+    "allow_refuel": true,
+    "allow_repair": true,
+    "explore_requires_police": true
+  }
+}
