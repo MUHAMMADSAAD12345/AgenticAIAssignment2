@@ -41,7 +41,7 @@ def mission_candidates(o: dict, cfg: dict) -> list[dict]:
     out = []
     for m in o.get('available_missions') or []:
         kind = gsx.mission_kind(m)
-        if kind not in ('mining', 'market'):
+        if kind not in ('mining', 'market') or not gsx.mission_doable_here(m, kind):
             continue
         qty = sum(ob.get('quantity') or 0 for ob in m['objectives'])
         if kind == 'mining' and qty > cap * 2:
@@ -138,6 +138,9 @@ def validate_plan(plan: dict, obs: dict, cfg: dict, progress: dict) -> tuple[lis
             m = next(m for m in obs[pilot]['available_missions'] if m['id'] == params['mission_id'])
             if gsx.mission_kind(m) == 'unsafe':
                 problems.append('unsafe mission rejected')
+                continue
+            if not gsx.mission_doable_here(m):
+                problems.append(f'mission {m["id"]!r} rejected: needs travel or objectives the MAS cannot do here')
                 continue
         if skill == 'explore_adjacent':
             if progress['met']['systems_explored']:

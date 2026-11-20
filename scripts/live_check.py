@@ -14,6 +14,7 @@ import json
 
 from mas import config, game_state as gsx
 from mas.mcp_game import GameError, GameSession
+from mas.ops import read_status
 
 NEEDED = ['login', 'get_status', 'get_system', 'get_poi', 'travel', 'dock', 'mine', 'sell', 'view_market',
           'get_missions', 'accept_mission', 'complete_mission', 'get_active_missions', 'refuel', 'jump']
@@ -24,22 +25,31 @@ async def check(cfg, pilot):
     async with GameSession(cfg, pilot, 'live_check') as gs:
         (config.LOGS / 'mcp_tools.json').write_text(json.dumps(gs.tools, indent=1), encoding='utf-8')
         print(f'MCP tools discovered: {len(gs.tools)} -> saved to logs/mcp_tools.json')
-        missing = [a for a in NEEDED if a not in gs.action_tool]
-        if gs.action_tool:
-            print('Action routing:', {a: gs.action_tool.get(a, 'MISSING') for a in NEEDED})
-            if missing:
-                print('WARNING missing actions (MAS falls back where it can):', missing)
-        else:
-            print('NOTE: schemas do not enumerate actions; default tool mapping from docs will be used')
+        # The core `spacemolt` tool takes a free-form action string (no enum), so most actions are routed
+        # by the documented default mapping; a route is only missing if the target tool itself is absent.
+        routes, missing = {}, []
+        for a in NEEDED:
+            try:
+                routes[a] = gs.tool_for(a) + ('' if a in gs.action_tool else ' (default)')
+            except GameError:
+                missing.append(a)
+        print('Action routing:', routes)
+        if missing:
+            print('WARNING no tool for actions:', missing)
+        undocumented = [a for a in NEEDED if a not in gs.action_tool and
+                        a not in json.dumps({n: d for n, d in gs.descriptions.items()})]
+        if undocumented:
+            print('WARNING actions not mentioned in any tool description:', undocumented)
         raw = await gs.call('get_status')
-        st = gsx.parse_status(raw)
+        st = await read_status(gs)
         print('Parsed status:', {k: st[k] for k in ('username', 'empire', 'credits', 'system', 'poi', 'docked',
                                                      'fuel', 'max_fuel', 'cargo_used', 'cargo_capacity', 'cargo')})
         print('Parsed stats :', st['stats'])
-        if st['username'] is None or not st['max_fuel']:
+        print('Location     :', {k: st.get(k) for k in ('system', 'poi', 'home_poi', 'home_base')})
+        if st['username'] is None or not st['max_fuel'] or st['system'] is None:
             print('WARNING: status fields not found. Top-level keys:', list(raw)[:20])
-        if all(v is None for v in st['stats'].values()):
-            print('WARNING: no stats parsed. player keys:', list((raw.get('player') or {}).keys())[:30])
+        if any(v is None for v in st['stats'].values()):
+            print('WARNING: stats missing:', [k for k, v in st['stats'].items() if v is None])
         if st['empire'] and st['empire'] != 'nebula':
             print('WARNING: pilot empire is', st['empire'], '(assignment requires nebula)')
         system = gsx.parse_system(await gs.call('get_system'))

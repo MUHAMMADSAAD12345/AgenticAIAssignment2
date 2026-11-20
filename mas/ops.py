@@ -7,9 +7,43 @@ are reconciled against fresh game state, so a sale is never replayed blindly.
 """
 from __future__ import annotations
 from mas import game_state as gsx
+from mas import text_formats as tf
 from mas.log import event
 from mas.mcp_game import GameError, GameSession, UnknownOutcome
 from mas.store import Store
+
+
+async def read_status(gs: GameSession) -> dict:
+    """Full pilot status from free queries (no tick cost).
+
+    JSON servers (and the local mock) return everything from get_status. The live MCP v2 server returns
+    get_status as text without stats or location ids, so the rest is filled in from:
+      get_player (JSON: credits, home, Service Record stats), get_system / get_poi headers (location ids)
+      and get_cargo (item lines; cargo_used/capacity from get_status is the fallback for mining checks).
+    """
+    st = gsx.parse_status(await gs.call('get_status'))
+    if st.get('system') is not None and st['stats'].get('credits_earned') is not None:
+        return st
+    try:
+        pl = await gs.call('get_player')
+        player = pl.get('player') if isinstance(pl.get('player'), dict) else {}
+        if player:
+            st['stats'] = gsx.normalize_stats(player.get('stats'))
+            st['credits'] = gsx.num(player.get('credits'), st['credits'])
+            for k in ('username', 'empire', 'home_base', 'home_poi'):
+                st[k] = player.get(k) or st.get(k)
+            st['home_system'] = player.get('home_system')
+    except GameError as e:
+        event('observe.player_unavailable', agent=gs.agent, task_id=gs.task_id, pilot=gs.pilot_key, code=e.code)
+    if st.get('system') is None and not st.get('in_transit'):
+        st['system'] = gsx.parse_system(await gs.call('get_system')).get('id')
+        st['poi'] = gsx.parse_poi(await gs.call('get_poi')).get('id')
+    if not st['cargo'] and st.get('cargo_used'):
+        st['cargo'] = tf.cargo((await gs.call('get_cargo')).get('_text') or '')
+        if not st['cargo']:
+            event('observe.cargo_unparsed', agent=gs.agent, task_id=gs.task_id, pilot=gs.pilot_key,
+                  cargo_used=st['cargo_used'], note='item lines not recognised; mining uses cargo_used')
+    return st
 
 
 class SafetyStop(Exception):
@@ -30,7 +64,7 @@ class PilotOps:
 
     # observations (free queries)
     async def status(self) -> dict:
-        return gsx.parse_status(await self.gs.call('get_status'))
+        return await read_status(self.gs)
 
     async def system(self) -> dict:
         return gsx.parse_system(await self.gs.call('get_system'))

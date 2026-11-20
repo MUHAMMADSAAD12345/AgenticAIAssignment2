@@ -174,9 +174,78 @@ def test_llm_planner_budget():
     print('[PASS] LLM planner: JSON plan parsed, budget ledger updated, key never logged')
 
 
+LIVE_STATUS = ('MenInBlack-P1 [nebula] | 250cr | Haven\n'
+               'Ship: Prospect (prospect) | Hull: 95/95 | Shield: 50/50 (+1/tick) | Armor: 4 | Speed: 1\n'
+               'Fuel: 130/130 | Cargo: 12/110 | CPU: 4/13 | Power: 10/26\n'
+               'Docked at: grand_exchange_station\nSecurity: Maximum Security (empire capital)\n'
+               'Connections: market_prime, traders_rest\n')
+LIVE_SYSTEM = ('System: Haven (haven) | Empire: nebula | Security: Maximum Security (empire capital)\n'
+               'Haven is the commercial heart of the Federation.\nPOIs (3):\n'
+               'id\tname\ttype\tclass\tbase\tbase_type\n'
+               'haven_star\tHaven Star\tsun\tG5V\t\t\n'
+               'grand_exchange\tGrand Exchange\tstation\t\tGrand Exchange Station\tstation\n'
+               'commerce_fields\tCommerce Fields\tasteroid_belt\tmetallic\t\t\n'
+               'Connections (2):\nsystem_id\tname\tdistance\n'
+               'market_prime\tMarket Prime\t407 GU\ntraders_rest\tTrader\'s Rest\t514 GU\n')
+LIVE_POI = ('POI: Grand Exchange (grand_exchange) | Type: station\nThe largest market.\n'
+            'Station: Grand Exchange Station (grand_exchange_station)\nServices: market, missions, refuel\n')
+LIVE_MISSIONS = ('Fixer network: debt 0cr; allowance 2,500cr; exposure 0cr; available 2,500cr.\n'
+                 'Missions at Grand Exchange Station (2):\n'
+                 '--- Titanium Extraction Contract [titanium_extraction_contract] (mining, difficulty 3) ---\n'
+                 'Titanium is in high demand for hull plating.\nFrom: Procurement Agent\n'
+                 'Rewards: 3,500cr, +25 mining XP\nObjectives:\n  - Mine 20 units of Titanium Ore\n'
+                 '--- Market Participation: Selling [market_participation_selling] (trading, difficulty 1) ---\n'
+                 'Sell items on the station exchange.\nRewards: 1,000cr, +15 trading XP\n'
+                 'Objectives:\n  - Sell 10 units of any item on the exchange\n')
+LIVE_MARKET = ('Market summary at Grand Exchange Station (2 items):\n'
+               'category\titem_id\titem_name\tbest_sell\tbest_buy\tspread\tsell_qty\tbuy_qty\n'
+               'ore\tiron_ore\tIron Ore\t12cr\t8cr\t4cr\t500\t1,200\n'
+               'ammo\temp_missiles\tEMP Missiles\t1,900cr\t2cr\t1,898cr\t21\t303\n')
+
+
+def test_live_text_formats():
+    st = gsx.parse_status({'_text': LIVE_STATUS})
+    assert st['username'] == 'MenInBlack-P1' and st['empire'] == 'nebula' and st['credits'] == 250
+    assert st['docked'] and st['docked_at'] == 'grand_exchange_station'
+    assert (st['fuel'], st['max_fuel'], st['cargo_used'], st['cargo_capacity'], st['cargo_free']) == (130, 130, 12, 110, 98)
+    assert st['hull_frac'] == 1.0
+    sy = gsx.parse_system({'_text': LIVE_SYSTEM})
+    assert sy['id'] == 'haven' and [c['system_id'] for c in sy['connections']] == ['market_prime', 'traders_rest']
+    assert sy['connections'][0]['distance'] == 407
+    assert [p['id'] for p in gsx.belts_by_distance(sy, st)] == ['commerce_fields']
+    assert gsx.base_poi(sy, dict(st, home_poi='grand_exchange'))['id'] == 'grand_exchange'
+    po = gsx.parse_poi({'_text': LIVE_POI})
+    assert po['id'] == 'grand_exchange' and po['base_id'] == 'grand_exchange_station'
+    ms = gsx.parse_missions({'_text': LIVE_MISSIONS})
+    assert [m['id'] for m in ms] == ['titanium_extraction_contract', 'market_participation_selling']
+    assert ms[0]['reward_credits'] == 3500 and ms[0]['type'] == 'mining' and ms[0]['difficulty'] == 3
+    assert ms[0]['objectives'][0]['item_id'] == 'titanium_ore' and ms[0]['objectives'][0]['quantity'] == 20
+    assert gsx.mission_kind(ms[0]) == 'mining' and gsx.mission_kind(ms[1]) == 'market'
+    assert gsx.mission_doable_here(ms[0]) and gsx.mission_doable_here(ms[1])
+    far = gsx.parse_missions({'_text': '--- Overdue Accounts [overdue_accounts] (mining, difficulty 2) ---\n'
+                              'Rewards: 7,000cr\nObjectives:\n  - Travel to the Procyon system\n'
+                              '  - Deliver 10 Platinum Ore to Procyon Colonial Station\n'
+                              '--- First Haul [first_haul] (salvage, difficulty 1) ---\nSalvage before more pilots arrive.\n'
+                              'Rewards: 500cr\nObjectives:\n  - Sell 1 wreck at a salvage yard\n'
+                              '--- Seam Glass [seam] (mining, difficulty 2) ---\nRewards: 7,000cr\nObjectives:\n'
+                              '  - Mine 5 Seam Glass past the rim\n'})
+    assert not any(gsx.mission_doable_here(m) for m in far), [m['id'] for m in far if gsx.mission_doable_here(m)]
+    assert gsx.mission_kind(far[1]) != 'mining'  # 'more'/'before' must not read as 'ore'
+    mk = gsx.parse_market({'_text': LIVE_MARKET})
+    assert mk['iron_ore']['bid'] == 8 and mk['iron_ore']['ask'] == 12 and mk['emp_missiles']['ask'] == 1900
+    from mas import text_formats as tf
+    assert tf.cargo('Cargo is empty. Capacity: 0/0, 0 available.\nCredits: 250cr') == {}
+    assert tf.cargo('item_id\tname\tquantity\tsize\niron_ore\tIron Ore\t12\t1\n') == {'iron_ore': 12}
+    assert tf.cargo('Iron Ore (iron_ore) x12\nCopper Ore (copper_ore) x3') == {'iron_ore': 12, 'copper_ore': 3}
+    # get_player keeps JSON: a reply with structured keys must not be treated as text-only
+    assert gsx.parse_status({'player': {'username': 'x', 'credits': 5}, '_text': 'x'})['credits'] == 5
+    print('[PASS] live MCP v2 text formats (status, system, poi, missions, market, cargo)')
+
+
 def main():
     test_schema_validation()
     test_parsers()
+    test_live_text_formats()
     test_error_classification()
     test_policy()
     test_idempotent_mutation()

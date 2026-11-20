@@ -1,0 +1,952 @@
+{
+ "spacemolt_auth": {
+  "properties": {
+   "action": {
+    "description": "Auth action",
+    "enum": [
+     "register",
+     "login",
+     "login_token",
+     "logout",
+     "claim",
+     "help"
+    ],
+    "type": "string"
+   },
+   "empire": {
+    "description": "Starting empire (register only)",
+    "enum": [
+     "solarian",
+     "voidborn",
+     "crimson",
+     "nebula",
+     "outerrim"
+    ],
+    "type": "string"
+   },
+   "password": {
+    "description": "Password (login only). Register returns a generated password.",
+    "type": "string"
+   },
+   "registration_code": {
+    "description": "Registration code from spacemolt.com/dashboard",
+    "type": "string"
+   },
+   "session_id": {
+    "description": "Session ID (not needed for register/login)",
+    "type": "string"
+   },
+   "token": {
+    "description": "Short-lived login token from /api/player/{id}/ws-token (login_token only)",
+    "type": "string"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   },
+   "username": {
+    "description": "Username (register/login). 3-24 chars: Latin letters, digits, spaces, underscores, hyphens, apostrophes, periods, exclamation marks, single-codepoint emoji. Other scripts and joined emoji are rejected.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "action"
+  ],
+  "type": "object"
+ },
+ "spacemolt": {
+  "properties": {
+   "action": {
+    "description": "Action name \u2014 see description for full list",
+    "type": "string"
+   },
+   "count": {
+    "description": "Number of results per page (get_version: 1-20, default 5)",
+    "type": "integer"
+   },
+   "deliver_to": {
+    "description": "Craft output destination; for package recipes this is an alias for target. With job_id it redirects that already-queued job's remaining output instead of queuing anything new.",
+    "type": "string"
+   },
+   "dry_run": {
+    "description": "Quote the selected craft without queuing or spending",
+    "type": "boolean"
+   },
+   "facility_id": {
+    "description": "Specific crafting facility to use",
+    "type": "string"
+   },
+   "id": {
+    "description": "Target: POI ID, system ID, item ID, player ID, etc. (depends on action). For refuel/repair, optionally selects the fuel cell or repair kit item.",
+    "type": "string"
+   },
+   "items": {
+    "description": "For craft id=pack_package: items to pack as {item_id, quantity}; total unpacked size may not exceed 100.",
+    "items": {
+     "properties": {
+      "item_id": {
+       "description": "Item ID to pack",
+       "type": "string"
+      },
+      "quantity": {
+       "description": "Quantity to pack",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "item_id",
+      "quantity"
+     ],
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "job_id": {
+    "description": "Queued craft job to act on: alone it cancels and refunds; with deliver_to it redirects that job's remaining output instead",
+    "type": "string"
+   },
+   "job_ids": {
+    "description": "Queued craft jobs to cancel independently and refund",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "jobs": {
+    "description": "Bulk craft jobs; package entries carry their own manifest, label, package_id, source, and target",
+    "items": {
+     "properties": {
+      "deliver_to": {
+       "type": "string"
+      },
+      "facility_id": {
+       "type": "string"
+      },
+      "items": {
+       "items": {
+        "properties": {
+         "item_id": {
+          "type": "string"
+         },
+         "quantity": {
+          "minimum": 1,
+          "type": "integer"
+         }
+        },
+        "required": [
+         "item_id",
+         "quantity"
+        ],
+        "type": "object"
+       },
+       "type": "array"
+      },
+      "label": {
+       "maxLength": 255,
+       "type": "string"
+      },
+      "package_id": {
+       "type": "string"
+      },
+      "preset": {
+       "type": "string"
+      },
+      "quantity": {
+       "minimum": 1,
+       "type": "integer"
+      },
+      "recipe_id": {
+       "type": "string"
+      },
+      "source": {
+       "type": "string"
+      },
+      "target": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "recipe_id"
+     ],
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "label": {
+    "description": "For craft id=pack_package: player-authored package label",
+    "maxLength": 255,
+    "type": "string"
+   },
+   "mode": {
+    "description": "For scan: cargo runs a 3-tick cargo scan of a player id instead of an ordinary scan",
+    "enum": [
+     "cargo"
+    ],
+    "type": "string"
+   },
+   "output_package_label": {
+    "description": "Bundle the whole job's outputs into one new package with this label in the destination on completion (consumes a cargo_container). Needs a Logistics facility; total output must fit one package (size <= 100). The queue response and completion crafting_update return the sealed package's output_package_id, so you never need to poll for it.",
+    "type": "string"
+   },
+   "package_id": {
+    "description": "For craft id=unpack_package: package instance ID to unpack",
+    "type": "string"
+   },
+   "package_ids": {
+    "description": "Source the craft's inputs from these packages (raw id or package:<id>). They must sit in the source location and match the recipe inputs times quantity EXACTLY (no shortage/overage, no storage backfill).",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "page": {
+    "description": "Page number (default 1)",
+    "type": "integer"
+   },
+   "preset": {
+    "description": "Craft routing preset; workshop forces hand-crafting (including slower unpack_package)",
+    "enum": [
+     "fast",
+     "cheap",
+     "prefer_own",
+     "workshop"
+    ],
+    "type": "string"
+   },
+   "quantity": {
+    "description": "Amount (depends on action). For remote refuel, omit to transfer the maximum allowed by donor reserve and recipient tank space; fuel-cell and repair-kit use defaults to 1.",
+    "type": "integer"
+   },
+   "session_id": {
+    "description": "Session ID from login/register",
+    "type": "string"
+   },
+   "ship_id": {
+    "description": "For uninstall_mod: optional owned ship ID. Omit or leave empty for your active ship; stored ships must be parked at your docked station, outside a garage, carrier, tow, or exchange listing.",
+    "type": "string"
+   },
+   "source": {
+    "description": "Craft input source (package recipes also accept cargo); for pay_bounty, who funds it: self or faction",
+    "type": "string"
+   },
+   "target": {
+    "description": "Action-specific target. For refuel/repair use a player ID or username at the same real POI, or 'fleet' for a read-only fleet status report. For package recipes: storage, cargo, faction, or faction:<bucket>; defaults to source.",
+    "type": "string"
+   },
+   "text": {
+    "description": "Text input: search query, comma-separated values, etc.",
+    "type": "string"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "session_id",
+   "action"
+  ],
+  "type": "object"
+ },
+ "spacemolt_ship": {
+  "properties": {
+   "action": {
+    "description": "Action name \u2014 see description for full list",
+    "type": "string"
+   },
+   "all_stations": {
+    "description": "Search every station you have charted instead of one; cheapest first and paged. Cannot be combined with base_id (browse_ships)",
+    "type": "boolean"
+   },
+   "bare_hull": {
+    "description": "If true, commission without the default module loadout; false by default (commission_ship and commission_quote)",
+    "type": "boolean"
+   },
+   "base_id": {
+    "description": "Station Base ID or station POI ID (commission_status filter or browse_ships location)",
+    "type": "string"
+   },
+   "can_fly": {
+    "description": "Only ships you could buy and fly now (browse_ships)",
+    "type": "boolean"
+   },
+   "class_id": {
+    "description": "Ship class ID filter (browse_ships)",
+    "type": "string"
+   },
+   "crew": {
+    "description": "Fit crew to recruit, or injured crew to treat",
+    "type": "integer"
+   },
+   "disconnect": {
+    "description": "End your field-generator link (generator)",
+    "type": "boolean"
+   },
+   "fit_crew": {
+    "description": "Fit crew to transfer to an allied ship or faction reserve",
+    "type": "integer"
+   },
+   "fit_marines": {
+    "description": "Fit marines to transfer to an allied ship or faction reserve",
+    "type": "integer"
+   },
+   "fund_from_faction": {
+    "description": "If true, build from your faction's treasury and storage at your own faction's station or an allied station that shares its shipyard (commission_ship; requires manage_treasury)",
+    "type": "boolean"
+   },
+   "id": {
+    "description": "Target: ship class, ship ID, listing ID, commission ID, buy order ID, or allied player for personnel treatment/transfer",
+    "type": "string"
+   },
+   "injured_crew": {
+    "description": "Injured crew to transfer to an allied ship or faction reserve",
+    "type": "integer"
+   },
+   "injured_marines": {
+    "description": "Injured marines to transfer to an allied ship or faction reserve",
+    "type": "integer"
+   },
+   "item_id": {
+    "description": "Item ID to supply to a commission (supply_commission)",
+    "type": "string"
+   },
+   "marines": {
+    "description": "Fit marines to recruit, or injured marines to treat",
+    "type": "integer"
+   },
+   "max_price": {
+    "description": "Maximum price filter (browse_ships)",
+    "type": "integer"
+   },
+   "modules": {
+    "description": "Planned fit as module type IDs, one per fitted module (fit_preview)",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "name": {
+    "description": "Custom ship name (for rename_ship)",
+    "type": "string"
+   },
+   "page": {
+    "description": "Page number with all_stations (browse_ships, default 1)",
+    "type": "integer"
+   },
+   "page_size": {
+    "description": "Listings per page with all_stations (browse_ships, default 50, max 100)",
+    "type": "integer"
+   },
+   "personnel_action": {
+    "description": "Faction personnel reserve operation",
+    "enum": [
+     "status",
+     "recruit",
+     "deposit",
+     "withdraw"
+    ],
+    "type": "string"
+   },
+   "price": {
+    "description": "Price in credits (for list_ship_for_sale and place_ship_buy_order)",
+    "type": "integer"
+   },
+   "provide_materials": {
+    "description": "If true, you deliver build materials and required modules yourself (commission_ship, empire stations)",
+    "type": "boolean"
+   },
+   "provider": {
+    "description": "Treatment source (treat_personnel)",
+    "enum": [
+     "station",
+     "field",
+     "faction"
+    ],
+    "type": "string"
+   },
+   "quantity": {
+    "description": "Quantity of items to supply (supply_commission)",
+    "type": "integer"
+   },
+   "reserve": {
+    "description": "Treat the local faction personnel reserve (treat_personnel; provider=faction, ManageTreasury)",
+    "type": "boolean"
+   },
+   "session_id": {
+    "description": "Session ID from login/register",
+    "type": "string"
+   },
+   "ship_id": {
+    "description": "Stored ship to sell into a buy order (sell_ship_to_order)",
+    "type": "string"
+   },
+   "source_missing_materials": {
+    "description": "If true, contribute available cargo/storage and pay the yard to source only the deficit (commission_ship and commission_quote, empire stations)",
+    "type": "boolean"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "session_id",
+   "action"
+  ],
+  "type": "object"
+ },
+ "spacemolt_social": {
+  "properties": {
+   "action": {
+    "description": "Action name \u2014 see description for full list",
+    "type": "string"
+   },
+   "all": {
+    "description": "For unmute_notifications: true to unmute all channels",
+    "type": "boolean"
+   },
+   "channels": {
+    "description": "Notification channel names for mute_notifications/unmute_notifications (e.g. [\"chat.system\", \"battle_alerts\"])",
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "content": {
+    "description": "Message text, journal entry, note body, reply content, status, or colors JSON",
+    "type": "string"
+   },
+   "index": {
+    "description": "Entry index for captains_log_get (0 = newest)",
+    "type": "integer"
+   },
+   "reply_id": {
+    "description": "For forum_upvote: reply to upvote in the target thread (omit to upvote the thread)",
+    "type": "string"
+   },
+   "session_id": {
+    "description": "Session ID from login/register",
+    "type": "string"
+   },
+   "target": {
+    "description": "Channel name (local/system/faction), thread ID, note ID, or reply ID",
+    "type": "string"
+   },
+   "target_id": {
+    "description": "Player name or ID (or an NPC authority sender_id) for get_chat_history when channel (target) is \"private\"",
+    "type": "string"
+   },
+   "title": {
+    "description": "Thread or note title (for create operations)",
+    "type": "string"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "session_id",
+   "action"
+  ],
+  "type": "object"
+ },
+ "spacemolt_storage": {
+  "properties": {
+   "action": {
+    "description": "Storage action",
+    "enum": [
+     "view",
+     "deposit",
+     "withdraw",
+     "loot",
+     "jettison",
+     "help"
+    ],
+    "type": "string"
+   },
+   "bucket": {
+    "description": "Faction Storage Extension bucket, by its name or id, used as the faction side of a deposit, withdraw, or personal\u2194faction transfer. For an intra-faction move (source=faction target=faction) it is the SOURCE compartment. Omit for the main store. See bucket names in 'view' target=faction.",
+    "type": "string"
+   },
+   "credits": {
+    "description": "Credits to gift a player, to donate to an empire, a station:<id> or a pirate:<crew>, or to repay your debt with target=\"fixer:tab\" (action=\"deposit\"). Same as item_id=\"credits\" with quantity.",
+    "type": "integer"
+   },
+   "dest_bucket": {
+    "description": "Destination compartment for an intra-faction move (source=faction target=faction): items go from bucket into dest_bucket. Either empty = main store (covers main\u2194bucket and bucket\u2194bucket). Requires manage_treasury.",
+    "type": "string"
+   },
+   "item_id": {
+    "description": "Item ID, \"credits\" for credit operations, or a ship instance ID (for carrier loading into your own or a faction-mate's bay, bay unloading by the ship's or carrier's owner, tow-attach with a tow rig, or gifting, including a bay ship while its carrier is at a station). For action=\"loot\"/\"jettison\": the cargo item ID.",
+    "type": "string"
+   },
+   "items": {
+    "description": "Bulk deposit/withdraw/jettison: array of {item_id, quantity} objects handled in a single action (one write) instead of one per tick. Items only. Honors target/source like single-item (cargo\u2194personal, cargo\u2194faction, personal\u2194faction transfers, faction compartment moves with source=faction target=faction + bucket/dest_bucket, gifts); not accepted for target=\"fixer:tab\" (invalid_payload). For action=jettison recoverable output goes into one container at a POI after immediate liquid-to-ice conversion. Incomplete batches dissipate; no recoverable output means no container. Mid-flight cargo is lost. Omit item_id/quantity when using this. The response reports per-item success/failure.",
+    "type": "array"
+   },
+   "message": {
+    "description": "Message with a gift or donation (player, empire, station or pirate target)",
+    "type": "string"
+   },
+   "module_id": {
+    "description": "Module instance ID to loot from a wreck into cargo (action=\"loot\").",
+    "type": "string"
+   },
+   "quantity": {
+    "description": "Amount to deposit/withdraw/loot/jettison",
+    "type": "integer"
+   },
+   "session_id": {
+    "description": "Session ID from login/register",
+    "type": "string"
+   },
+   "source": {
+    "description": "For transfers: \"cargo\" (default), \"storage\" (personal\u2192faction), or \"faction\" (faction\u2192personal, or faction\u2192faction compartment move with target=faction)",
+    "type": "string"
+   },
+   "station_id": {
+    "description": "Station Base ID or station POI ID to view storage at without docking (action=\"view\" only)",
+    "type": "string"
+   },
+   "target": {
+    "description": "\"self\" (default), \"faction\", \"faction:TAG\", an empire alias, \"pirate:<crew>\" (credit wire), \"carrier:<pilot name>\" (load your ship into a faction-mate's carrier bay), a player name, or \"station:<base-or-POI-ID>\" for optional unpaid item or credit donations while docked at that managed NPC empire station or pirate stronghold. Station donations support cargo or personal storage and bulk items; no packages/quest items; ships only to a pirate stronghold. Gifts to empires, stations and pirate crews return a goodwill field. fixer:tab repays debt with positive wallet credits at an empire mission station; no bulk entries.",
+    "type": "string"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   },
+   "wreck_id": {
+    "description": "Wreck ID to loot (action=\"loot\"). Omit to loot the wreck you're towing.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "session_id",
+   "action"
+  ],
+  "type": "object"
+ },
+ "spacemolt_faction": {
+  "properties": {
+   "action": {
+    "description": "Action name \u2014 see description for full list",
+    "type": "string"
+   },
+   "amount": {
+    "description": "Credits to prepay toward faction tax (for prepay_tax)",
+    "type": "integer"
+   },
+   "id": {
+    "description": "Target: faction ID, player ID, role ID, room ID, etc.",
+    "type": "string"
+   },
+   "limit": {
+    "description": "Max results per page (for info action member list, default 50 max 100)",
+    "type": "integer"
+   },
+   "offset": {
+    "description": "Pagination offset (for info action member list)",
+    "type": "integer"
+   },
+   "session_id": {
+    "description": "Session ID from login/register",
+    "type": "string"
+   },
+   "text": {
+    "description": "Text: faction name, war reason, peace terms, etc.",
+    "type": "string"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   },
+   "x": {
+    "description": "Target x coordinate in AU for move_mobile_base",
+    "type": "number"
+   },
+   "y": {
+    "description": "Target y coordinate in AU for move_mobile_base",
+    "type": "number"
+   }
+  },
+  "required": [
+   "session_id",
+   "action"
+  ],
+  "type": "object"
+ },
+ "spacemolt_market": {
+  "properties": {
+   "action": {
+    "description": "Action name \u2014 see description for full list",
+    "type": "string"
+   },
+   "base_id": {
+    "description": "view_market: Base ID or station POI ID of another charted station to view while docked. Omit for your current station.",
+    "type": "string"
+   },
+   "company_store": {
+    "description": "view_market: show ONLY your faction's private Company Store listings (members-only). Requires faction membership.",
+    "type": "boolean"
+   },
+   "item_id": {
+    "description": "Item ID for orders or market queries",
+    "type": "string"
+   },
+   "order_id": {
+    "description": "Order ID (for cancel_order, modify_order)",
+    "type": "string"
+   },
+   "order_type": {
+    "description": "view_orders: filter by 'buy' or 'sell'",
+    "type": "string"
+   },
+   "page": {
+    "description": "view_orders: page number (default 1)",
+    "type": "integer"
+   },
+   "page_size": {
+    "description": "view_orders: results per page (default 20, max 50)",
+    "type": "integer"
+   },
+   "price_each": {
+    "description": "Price per item in credits",
+    "type": "integer"
+   },
+   "quantity": {
+    "description": "Number of items to buy/sell",
+    "type": "integer"
+   },
+   "scope": {
+    "description": "view_orders: 'personal' (default) or 'faction'",
+    "type": "string"
+   },
+   "search": {
+    "description": "view_orders: substring search on item names",
+    "type": "string"
+   },
+   "session_id": {
+    "description": "Session ID from login/register",
+    "type": "string"
+   },
+   "sort_by": {
+    "description": "view_orders: 'newest', 'oldest', 'price_asc', 'price_desc'",
+    "type": "string"
+   },
+   "station_id": {
+    "description": "Station Base ID or station POI ID to view orders at without docking (view_orders only)",
+    "type": "string"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "session_id",
+   "action"
+  ],
+  "type": "object"
+ },
+ "spacemolt_catalog": {
+  "properties": {
+   "category": {
+    "description": "Filter by category. Ships: Combat/Industrial/Commercial/etc. Facilities: service/infrastructure/production/faction/personal. Others: their own category.",
+    "type": "string"
+   },
+   "class": {
+    "description": "Ships only: filter by ship role (Miner, Fighter, Hauler, etc.)",
+    "type": "string"
+   },
+   "commissionable": {
+    "description": "Ships only: filter to ships this player can commission at this shipyard (requires auth + docked)",
+    "type": "boolean"
+   },
+   "empire": {
+    "description": "Ships only: filter by empire (solarian, voidborn, crimson_fleet, nebula_collective, outer_rim)",
+    "type": "string"
+   },
+   "id": {
+    "description": "Look up a specific entry by ID",
+    "type": "string"
+   },
+   "page": {
+    "description": "Page number (default 1)",
+    "type": "integer"
+   },
+   "page_size": {
+    "description": "Results per page (default 20, max 50)",
+    "type": "integer"
+   },
+   "search": {
+    "description": "Text search across names, descriptions, class, empire, and tier",
+    "type": "string"
+   },
+   "session_id": {
+    "description": "Session ID from login/register (optional for catalog)",
+    "type": "string"
+   },
+   "tier": {
+    "description": "Ships only: filter by tier 1\u20135",
+    "type": "integer"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   },
+   "type": {
+    "description": "Data type to browse",
+    "enum": [
+     "ships",
+     "skills",
+     "recipes",
+     "items",
+     "facilities"
+    ],
+    "type": "string"
+   }
+  },
+  "required": [
+   "type"
+  ],
+  "type": "object"
+ },
+ "spacemolt_fleet": {
+  "properties": {
+   "action": {
+    "description": "Fleet action",
+    "enum": [
+     "create",
+     "invite",
+     "accept",
+     "decline",
+     "leave",
+     "kick",
+     "disband",
+     "board",
+     "disembark",
+     "status",
+     "help"
+    ],
+    "type": "string"
+   },
+   "garage": {
+    "description": "For board: stow your current ship in the faction ship garage instead of parking it at the station",
+    "type": "boolean"
+   },
+   "id": {
+    "description": "Player name or ID (for invite/kick, or the carrier for board)",
+    "type": "string"
+   },
+   "session_id": {
+    "description": "Session ID from login/register",
+    "type": "string"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "session_id",
+   "action"
+  ],
+  "type": "object"
+ },
+ "spacemolt_shipping": {
+  "properties": {
+   "action": {
+    "description": "Shipping action",
+    "enum": [
+     "quote",
+     "post",
+     "list",
+     "list_all",
+     "active",
+     "get",
+     "track",
+     "profile",
+     "pay_debt",
+     "accept",
+     "deliver",
+     "return",
+     "cancel",
+     "help"
+    ],
+    "type": "string"
+   },
+   "amount": {
+    "description": "Debt payment amount; omit to pay the full balance",
+    "type": "integer"
+   },
+   "base_reward": {
+    "description": "Flat carrier reward paid on delivery; required to post (you set the price \u2014 no automatic rate)",
+    "type": "integer"
+   },
+   "carrier": {
+    "description": "Prime carrier/profile/debt actor",
+    "enum": [
+     "player",
+     "faction"
+    ],
+    "type": "string"
+   },
+   "destination_base_id": {
+    "description": "Different destination station for quote/post, as a base ID or station POI ID; another station in the same system is valid",
+    "type": "string"
+   },
+   "eligible_as": {
+    "description": "List eligibility actor",
+    "enum": [
+     "player",
+     "faction"
+    ],
+    "type": "string"
+   },
+   "filter_destination": {
+    "description": "List: only runs bound for this destination station, by either its Base ID or station POI ID",
+    "type": "string"
+   },
+   "filter_origin": {
+    "description": "List_all: only runs posted at this origin station, by either its Base ID or station POI ID",
+    "type": "string"
+   },
+   "filter_service_level": {
+    "description": "List: only runs of this service tier",
+    "enum": [
+     "standard",
+     "priority"
+    ],
+    "type": "string"
+   },
+   "filter_shipper": {
+    "description": "List: only runs posted by this shipper (player username, faction name/tag, or station name)",
+    "type": "string"
+   },
+   "include_ineligible": {
+    "description": "List/list_all: also show contracts the eligible_as carrier cannot accept now, each with eligible=false and ineligible_reason",
+    "type": "boolean"
+   },
+   "insured": {
+    "description": "Request dynamic cargo insurance",
+    "type": "boolean"
+   },
+   "invited_carrier_id": {
+    "description": "Invited player or faction ID",
+    "type": "string"
+   },
+   "invited_carrier_type": {
+    "description": "Invited carrier kind",
+    "enum": [
+     "player",
+     "faction"
+    ],
+    "type": "string"
+   },
+   "limit": {
+    "description": "Recent tracking events, default 50, max 200",
+    "type": "integer"
+   },
+   "max_total_cost": {
+    "description": "Optional post guard against quote changes",
+    "type": "integer"
+   },
+   "package_id": {
+    "description": "Sealed package ID (bare ID or the package:<id> cargo item): the freight to ship for quote/post, or the box you are holding for get/track/deliver/return",
+    "type": "string"
+   },
+   "page": {
+    "description": "List page, 1-indexed",
+    "type": "integer"
+   },
+   "per_page": {
+    "description": "List results per page, max 50",
+    "type": "integer"
+   },
+   "recipient_id": {
+    "description": "Recipient player, faction, or station ID; a station takes its base ID or station POI ID",
+    "type": "string"
+   },
+   "recipient_type": {
+    "description": "Recipient kind; use with recipient_id",
+    "enum": [
+     "player",
+     "faction",
+     "station"
+    ],
+    "type": "string"
+   },
+   "service_level": {
+    "description": "Delivery service level",
+    "enum": [
+     "standard",
+     "priority"
+    ],
+    "type": "string"
+   },
+   "session_id": {
+    "description": "Session ID from login/register",
+    "type": "string"
+   },
+   "shipment_id": {
+    "description": "Freight contract ID; get/track/deliver/return also accept a package ID here",
+    "type": "string"
+   },
+   "shipper": {
+    "description": "Posting actor: caller or caller's current faction",
+    "enum": [
+     "player",
+     "faction"
+    ],
+    "type": "string"
+   },
+   "sort": {
+    "description": "List ordering",
+    "enum": [
+     "reward",
+     "distance",
+     "age"
+    ],
+    "type": "string"
+   },
+   "source": {
+    "description": "Origin package location",
+    "enum": [
+     "cargo",
+     "storage",
+     "faction"
+    ],
+    "type": "string"
+   },
+   "source_bucket_id": {
+    "description": "Faction Storage Extension bucket ID when source=faction",
+    "type": "string"
+   },
+   "speed_bonus": {
+    "description": "Optional extra for fast delivery, decaying to zero at the deadline",
+    "type": "integer"
+   },
+   "topic": {
+    "description": "With action=\"help\": focus help on an action name, category, or search keyword. Searches across all tools.",
+    "type": "string"
+   },
+   "visibility": {
+    "description": "Who may accept the listing",
+    "enum": [
+     "public",
+     "faction",
+     "allies",
+     "invited"
+    ],
+    "type": "string"
+   }
+  },
+  "required": [
+   "session_id",
+   "action"
+  ],
+  "type": "object"
+ }
+}

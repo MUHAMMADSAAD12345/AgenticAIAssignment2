@@ -6,12 +6,14 @@ from pathlib import Path
 
 SENSITIVE=('password','api_key','token','registration_code','session_id','authorization','secret','cookie')
 KEYPAT=re.compile(r'\bgsk_[A-Za-z0-9_-]{15,}\b')
+# Secrets embedded in free text, e.g. the MCP login reply "Session ID: <token>".
+TEXTPAT=re.compile(r'(?i)\b(session[ _]?id|password|token|registration[ _]code)(\W{0,3}\s*)[A-Za-z0-9_.-]{6,}')
 
 def scrub(value):
     if isinstance(value,dict):
         return {k:('[REDACTED]' if any(s in str(k).lower() for s in SENSITIVE) else scrub(v)) for k,v in value.items()}
     if isinstance(value,list): return [scrub(x) for x in value]
-    if isinstance(value,str): return KEYPAT.sub('[REDACTED GROQ KEY]',value)
+    if isinstance(value,str): return TEXTPAT.sub(r'\1\2[REDACTED]',KEYPAT.sub('[REDACTED GROQ KEY]',value))
     return value
 
 def record(event, *, agent='system', task_id=None, data=None, path='logs/events.jsonl'):

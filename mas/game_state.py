@@ -4,6 +4,8 @@ import math
 import re
 from typing import Any
 
+from mas import text_formats as tf
+
 STAT_KEYS = {
     'credits_earned': ['credits_earned', 'total_credits_earned', 'lifetime_credits_earned', 'earned'],
     'credits_spent': ['credits_spent', 'total_credits_spent', 'lifetime_credits_spent', 'spent'],
@@ -99,7 +101,30 @@ def cargo_map(ship: dict | None, extra: Any = None) -> dict[str, int]:
     return out
 
 
+def _only_text(data: dict) -> str:
+    """Text of a reply that carries no JSON payload (live MCP v2 style), else ''."""
+    if not isinstance(data, dict):
+        return ''
+    if any(k != '_text' for k in data):
+        return ''
+    return data.get('_text') or ''
+
+
 def parse_status(data: dict) -> dict:
+    text = _only_text(data)
+    if text:
+        t = tf.status(text)
+        fuel, max_fuel, hull, max_hull = t['fuel'], t['max_fuel'], t['hull'], t['max_hull']
+        used, cap = t['cargo_used'], t['cargo_capacity']
+        return {
+            'username': t['username'], 'empire': t['empire'], 'credits': t['credits'],
+            'system': None, 'system_name': t['system_name'], 'poi': None,
+            'docked_at': t['docked_at'], 'docked': bool(t['docked_at']), 'home_base': None, 'home_poi': None,
+            'fuel': fuel, 'max_fuel': max_fuel, 'fuel_frac': (fuel / max_fuel) if max_fuel else 1.0,
+            'hull': hull, 'max_hull': max_hull, 'hull_frac': (hull / max_hull) if max_hull else 1.0,
+            'cargo_used': used, 'cargo_capacity': cap, 'cargo_free': max(0, cap - used), 'cargo': {},
+            'speed': t['speed'], 'stats': normalize_stats(None), 'in_transit': t['in_transit'],
+        }
     player = data.get('player') if isinstance(data.get('player'), dict) else \
         find_dict(data, lambda d: 'credits' in d and ('username' in d or 'current_system' in d)) or {}
     ship = data.get('ship') if isinstance(data.get('ship'), dict) else \
@@ -116,7 +141,7 @@ def parse_status(data: dict) -> dict:
         'poi': player.get('current_poi') or (data.get('poi') or {}).get('id'),
         'docked_at': docked or None,
         'docked': bool(docked),
-        'home_base': player.get('home_base'),
+        'home_base': player.get('home_base'), 'home_poi': player.get('home_poi'),
         'fuel': fuel, 'max_fuel': max_fuel,
         'fuel_frac': (fuel / max_fuel) if max_fuel else 1.0,
         'hull': hull, 'max_hull': max_hull,
@@ -131,6 +156,8 @@ def parse_status(data: dict) -> dict:
 
 
 def parse_system(data: dict) -> dict:
+    if _only_text(data):
+        return tf.system(_only_text(data))
     sysobj = data.get('system') if isinstance(data.get('system'), dict) else data
     pois = sysobj.get('pois') or find_list(data, lambda d: 'id' in d and 'type' in d and ('has_base' in d or 'position' in d)) or []
     conns = sysobj.get('connections') or find_list(data, lambda d: 'system_id' in d) or []
@@ -146,6 +173,8 @@ def parse_system(data: dict) -> dict:
 
 
 def parse_poi(data: dict) -> dict:
+    if _only_text(data):
+        return tf.poi(_only_text(data))
     poi = data.get('poi') if isinstance(data.get('poi'), dict) else data
     res = poi.get('resources') or find_list(data, lambda d: 'resource_id' in d) or []
     return {'id': poi.get('id'), 'type': poi.get('type'), 'base_id': poi.get('base_id'),
@@ -172,6 +201,9 @@ def poi_by_id(system: dict, poi_id):
 def base_poi(system: dict, status: dict):
     bases = [p for p in system['pois'] if p['has_base']]
     for p in bases:
+        if status.get('home_poi') and status['home_poi'] == p.get('id'):
+            return p
+    for p in bases:
         if status.get('home_base') and status['home_base'] in (p.get('base_id'), p.get('id')):
             return p
     for p in bases:
@@ -188,6 +220,8 @@ def belts_by_distance(system: dict, status: dict, avoid=()):
 
 
 def parse_missions(data: dict) -> list[dict]:
+    if _only_text(data):
+        return tf.missions(_only_text(data))
     items = data.get('missions')
     if not isinstance(items, list):
         items = find_list(data, lambda d: ('mission_id' in d or 'id' in d or 'template_id' in d) and
@@ -221,22 +255,60 @@ def parse_missions(data: dict) -> list[dict]:
     return out
 
 
+def _has_word(text: str, words) -> bool:
+    return any(re.search(rf'\b{re.escape(w)}', text) for w in words)
+
+
 def mission_kind(m: dict) -> str:
-    t = f"{m.get('type', '')} {m.get('title', '')} {m.get('description', '')}".lower()
-    if any(w in t for w in ('combat', 'bounty', 'kill', 'destroy', 'pirate', 'escort', 'smuggl')):
+    """Whole-word keyword match (substring matching made 'more'/'before' look like 'ore')."""
+    declared = str(m.get('type') or '').lower()
+    t = f"{declared} {m.get('title', '')} {m.get('description', '')} " \
+        f"{' '.join(str(o.get('description') or '') for o in m.get('objectives') or [])}".lower()
+    if _has_word(t, ('combat', 'bounty', 'kill', 'destroy', 'pirate', 'escort', 'smuggl', 'hunt', 'attack')):
         return 'unsafe'
-    if any(w in t for w in ('ore', 'mining', 'mine ', 'supply run', 'requisition')):
+    if declared in ('mining', 'trading', 'market', 'exploration', 'delivery'):
+        return {'trading': 'market'}.get(declared, declared)
+    if _has_word(t, ('ore', 'mining', 'mine', 'supply run', 'requisition')):
         return 'mining'
-    if any(w in t for w in ('sell order', 'buy order', 'listing', 'market participation', 'exchange')):
+    if _has_word(t, ('sell order', 'buy order', 'listing', 'market participation', 'exchange')):
         return 'market'
-    if any(w in t for w in ('deliver', 'delivery', 'resupply', 'haul', 'cargo')):
+    if _has_word(t, ('deliver', 'delivery', 'resupply', 'haul', 'cargo')):
         return 'delivery'
-    if any(w in t for w in ('visit', 'explore', 'survey', 'tour', 'audit')):
+    if _has_word(t, ('visit', 'explore', 'survey', 'tour', 'audit')):
         return 'exploration'
     return 'other'
 
 
+LOCAL_MINE_OBJ = re.compile(r'^\s*mine\s+\d[\d,]*\s+(units?\s+of\s+)?[a-z ]+?\s+ore\b(?!.*\b(past|beyond|in the|at)\b)', re.I)
+LOCAL_SELL_OBJ = re.compile(r'^\s*sell\s+\d[\d,]*\s+units?\s+of\s+any\s+item\s+on\s+the\s+exchange\b', re.I)
+
+
+def mission_doable_here(m: dict, kind: str | None = None) -> bool:
+    """True only for missions this MAS can finish at its home station without extra travel:
+    mining missions whose every objective is 'Mine N units of X Ore' (JSON: an *_ore item), and market missions
+    whose every objective is selling on this exchange. Travel / other-station / wreck objectives are excluded."""
+    kind = kind or mission_kind(m)
+    objs = m.get('objectives') or []
+    if not objs:
+        return False
+    for o in objs:
+        desc = o.get('description')
+        if kind == 'mining':
+            if not str(o.get('item_id') or '').endswith('_ore') or not (o.get('quantity') or 0):
+                return False
+            if desc and not LOCAL_MINE_OBJ.search(desc):
+                return False
+        elif kind == 'market':
+            if not (desc and LOCAL_SELL_OBJ.search(desc)):
+                return False
+        else:
+            return False
+    return True
+
+
 def parse_market(data: dict) -> dict[str, dict]:
+    if _only_text(data):
+        return tf.market(_only_text(data))
     items = data.get('items') if isinstance(data.get('items'), list) else \
         find_list(data, lambda d: 'item_id' in d) or []
     out = {}

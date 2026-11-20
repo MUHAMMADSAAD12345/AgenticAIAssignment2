@@ -188,6 +188,7 @@ class GameSession:
         self.url = cfg['mcp_endpoint']
         self.timeout = float(cfg['limits'].get('mcp_call_timeout_seconds', 600))
         self.tools: dict[str, dict] = {}
+        self.descriptions: dict[str, str] = {}
         self.action_tool: dict[str, str] = {}
         self.session: ClientSession | None = None
         self._stack: AsyncExitStack | None = None
@@ -221,6 +222,7 @@ class GameSession:
         await session.initialize()
         listed = await session.list_tools()
         self.tools = {t.name: (t.input_schema or {}) for t in listed.tools}
+        self.descriptions = {t.name: (t.description or '') for t in listed.tools}
         self.action_tool = {}
         for name, schema in self.tools.items():
             for a in schema_actions(schema):
@@ -235,7 +237,14 @@ class GameSession:
                                log_args={'action': 'login', 'username': self.username})
         password = None
         sid = _find_key(data, 'session_id')
-        self._session_id = sid if isinstance(sid, str) else None
+        if not isinstance(sid, str):
+            # Live MCP v2 replies in plain text: "Welcome back, <name>! Session ID: <token>".
+            m = re.search(r'session[ _]id\W{0,3}\s*([A-Za-z0-9_\-]{8,})', data.get('_text') or '', re.I)
+            sid = m.group(1) if m else None
+        self._session_id = sid
+        schema = self.tools.get('spacemolt') or {}
+        if not sid and 'session_id' in (schema.get('required') or []):
+            raise GameError('session_invalid', 'login reply contained no session_id')
         event('mcp.login', agent=self.agent, task_id=self.task_id, pilot=self.pilot_key,
               username=self.username, confirmed=True)
         return data
@@ -328,7 +337,7 @@ class GameSession:
         event('mcp.result', agent=self.agent, task_id=self.task_id, pilot=self.pilot_key, tool=tool,
               action=args.get('action'), args=safe, mutation=mutation, ms=ms,
               confirmation=_summary(data, text))
-        data.setdefault('_text', text[:2000])
+        data.setdefault('_text', text[:400000])  # full text: market lists 500+ items
         return data
 
 

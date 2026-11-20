@@ -19,7 +19,7 @@ os.environ.setdefault('MAS_RUN_ID', 'baseline')
 from mas import config, game_state as gsx  # noqa: E402
 from mas.log import event  # noqa: E402
 from mas.mcp_game import GameError, GameSession  # noqa: E402
-from mas.ops import PilotOps, SafetyStop  # noqa: E402
+from mas.ops import PilotOps, SafetyStop, read_status  # noqa: E402
 from mas.store import Store  # noqa: E402
 
 AGENT = 'baseline'
@@ -30,7 +30,7 @@ async def run(cfg, pilot, minutes, max_loops):
     deadline = time.time() + minutes * 60
     loop_no = store.kv_get('loop', 0)
     async with GameSession(cfg, pilot, AGENT) as gs:
-        start = gsx.parse_status(await gs.call('get_status'))
+        start = await read_status(gs)
         event('baseline.start', agent=AGENT, pilot=pilot, stats=start['stats'], credits=start['credits'])
         while time.time() < deadline and loop_no < max_loops:
             loop_no += 1
@@ -85,7 +85,7 @@ async def run(cfg, pilot, minutes, max_loops):
             except (GameError, SafetyStop) as e:
                 event('baseline.error', agent=AGENT, task_id=mid, error=str(e)[:200])
                 await asyncio.sleep(15)
-        end = gsx.parse_status(await gs.call('get_status'))
+        end = await read_status(gs)
         event('baseline.end', agent=AGENT, pilot=pilot, stats=end['stats'], credits=end['credits'],
               mcp_calls=gs.calls, mutations=gs.mutations)
 
