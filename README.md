@@ -7,7 +7,7 @@ worker services. The workers play the game through authenticated SpaceMolt MCP v
 |---|---|---|---|
 | Coordinator / planner | `python -m mas.coordinator` | - | observe, plan (LLM + validation + fallback), delegate, recover |
 | Mining / acquisition | `python -m mas.agents.mining_agent` | 9999 | `observe`, `mine_cycle` |
-| Trading / logistics | `python -m mas.agents.trading_agent` | 9998 | `observe`, `accept_mission`, `sell_and_complete`, `list_item`, `explore_adjacent` |
+| Trading / logistics | `python -m mas.agents.trading_agent` | 9998 | `observe`, `accept_mission`, `sell_and_complete`, `list_item`, `explore_adjacent`, `relocate` |
 
 Architecture diagram: `docs/architecture.svg` (PNG: `docs/architecture.png`). Report: `REPORT.md`.
 
@@ -112,7 +112,9 @@ refuses to start once 8 hours are used. The coordinator stops by itself when all
 | `session_invalid` / expired | Re-login once and retry. |
 | Invalid parameters | Rejected locally before sending (`mcp.invalid_params`). |
 | Stale observation | Re-observed every cycle; `accept_mission` re-checks the offer and returns `stale_observation`. |
-| Belt depleted / no gain | Alternate belt (`recovery.alternate_belt`). |
+| Belt depleted / no gain | Alternate belt (`recovery.alternate_belt`); the coordinator records it in durable world memory and stops sending miners there. If every local belt is depleted, one pilot scouts the nearest affordable neighbour (`relocate`) and the other follows only once ore is proven. |
+| Gateway HTTP 429 (60 requests/min per IP) | Shared cross-process pacer (`mas/pacer.py`, 50/min); a 429 becomes `mcp.rate_limited` and every process waits for Retry-After instead of reconnecting. |
+| Coordinator restart | World memory is rebuilt from stored task results (`recovery.memory_rebuilt`); resumed tasks are re-validated against it. |
 | Missing worker | `worker.missing` with backoff; the other pilot keeps working. |
 | Low fuel / hull | Refuel/repair when docked within the spend allowance, otherwise `safety.stop`. |
 
@@ -152,8 +154,10 @@ Writes `submission\` (LLM usage summary, runtime summary, baseline comparison, r
 mas/coordinator.py          planner, delegation, restart recovery, runtime ledger
 mas/agents/worker_base.py   A2A intake, mission idempotency, pilot locks, observe skill
 mas/agents/mining_agent.py  mine_cycle
-mas/agents/trading_agent.py accept/complete missions, sales, listings, exploration
+mas/agents/trading_agent.py accept/complete missions, sales, listings, exploration, relocation
 mas/mcp_game.py             MCP session, schema validation, error recovery, forbidden actions
+mas/pacer.py                cross-process HTTP pacer for the 60 req/min/IP gateway limit
+mas/text_formats.py         parsers for the live server's plain-text replies
 mas/ops.py                  idempotent mutations, reconcilers, safety gates, movement
 mas/game_state.py           tolerant parsers for SpaceMolt objects
 mas/policy.py               plan validation, fallback policy, progress vs targets
@@ -164,7 +168,8 @@ baseline/single_agent.py    single-agent baseline
 scripts/live_check.py       read-only live MCP check
 scripts/compare_runs.py     baseline vs MAS metrics
 scripts/make_submission.py  submission bundle
-tests/                      unit tests, mock server, end-to-end restart test
+tests/                      unit tests, mock server, e2e restart test (e2e_mock), e2e depletion/relocation test (e2e_relocate)
+logs/RUN_LOG.md             per-run record of the assessed runs (with archive/.../INCIDENT.md)
 ```
 
 Coding-assistant disclosure: parts of this code were written with an AI coding assistant; both group members

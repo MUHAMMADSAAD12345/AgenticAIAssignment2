@@ -3,8 +3,9 @@
 Group: **MenInBlack** | Members: Muhammad Saad (i232084), Muhammad Alyun (i230022)
 Pilots: `https://spacemolt.com/player/MenInBlack-P1`, `https://spacemolt.com/player/MenInBlack-P2`
 
-**Result at a glance:** 23.5 / 25 platform marks · 2,466 credits earned · 65 ore · 19 exchange items sold ·
-0 credits spent · 1,287 distance · 109.8 / 480 assessed minutes · 16 / 300 LLM requests.
+**Result at a glance:** 25 / 25 platform marks on the public profiles (23.5 if the API's `systems_explored`
+counter is used; see §4) · 2,466 credits earned · 65 ore · 19 exchange items sold · 0 credits spent ·
+1,287 distance · 109.8 / 480 assessed minutes · 16 / 300 LLM requests.
 
 ```mermaid
 flowchart LR
@@ -124,6 +125,24 @@ params}`, result as a JSON artifact); authenticated SpaceMolt MCP v2 between wor
 Memory: `coordinator.sqlite3` (tasks, cycles, observations, heartbeat), one SQLite file per worker
 (missions, mutation ledger, checkpoints, accepted missions), `budget.sqlite3`, `runtime.sqlite3`.
 
+### 2.1 Fresh observations instead of stale plans
+
+Plans are never carried forward. Every cycle starts with a new A2A `observe` task per pilot (free MCP
+queries, no game ticks), and the plan for that cycle may only use that observation:
+
+* **Planning input is always fresh.** If an observe fails, the coordinator reuses the previous observation only
+  if it is younger than `max_observation_age_seconds` (120 s); otherwise that pilot gets no task this cycle.
+* **The validator checks the plan against the fresh state.** A mission id must be in the pilot's freshly
+  observed offers ("not in fresh observation"). A relocation target must be adjacent to the pilot's current
+  system. Mining is refused where every belt is known depleted. Spend and distance allowances come from the
+  freshly summed counters.
+* **Workers re-check right before acting.** `accept_mission` re-reads the offers and returns
+  `stale_observation` if the mission is gone. Each mutation re-reads status for its ledger pre-state, and the
+  outcome is confirmed by a new read afterwards.
+* **Memory expires.** A belt marked depleted is retried after 6 h, and the mark is cleared as soon as the
+  belt yields ore again. Tasks resumed after a restart are re-validated against memory (a resumed
+  `mine_cycle` gets the current `avoid_belts` list).
+
 ## 3. Where the LLM is used and why
 
 The LLM chooses *which* task each pilot does next from fresh observations: which mission to take (reward vs
@@ -148,34 +167,40 @@ flowchart TB
 In the live runs the validator rejected **6** LLM proposals. Most were "explore an adjacent system" once
 the distance budget was nearly used, which would have cost more marks than it gained.
 
-## 4. Real outcomes (live API counters after run 6, 2026-11-20 18:27 UTC)
+## 4. Real outcomes (after run 6)
 
-Verify on the public profiles before submitting: https://spacemolt.com/player/MenInBlack-P1 and
-https://spacemolt.com/player/MenInBlack-P2
+Public profiles (what the TA opens): https://spacemolt.com/player/MenInBlack-P1 and
+https://spacemolt.com/player/MenInBlack-P2. Both show *Nebula Trade Federation*, enlisted 2026-11-20.
 
-| Statistic | Pilot A (P1) | Pilot B (P2) | Combined | Band marks |
-|---|---|---|---|---|
-| Credits earned | 4 | 2,462 | 2,466 | 8/8 |
-| Credits spent | 0 | 0 | 0 | 3/3 |
-| Ore mined | 10 | 55 | 65 | 4/4 |
-| Trades completed / Exchange items sold | 1 / 1 | 3 / 18 | 4 / 19 | 4/4 |
-| Distance traveled (AU) | 1,253 | 34 | 1,287 | 3/3 |
-| Systems explored | 1 | 0 | 1 | 1.5/3 |
-| **Total** (`python -m scripts.platform_score --earned 2466 --spent 0 --ore 65 --trades 4 --exchange-sales 19 --distance 1287 --systems 1`) | | | | **23.5/25** |
+| Statistic | P1 public | P2 public | Public combined | API combined (`get_player`, 2026-11-20 18:27 UTC) | Band marks |
+|---|---|---|---|---|---|
+| Credits earned | 4 | 2.5K (2,462) | 2,466 | 2,466 (4 + 2,462) | 8/8 |
+| Credits spent | – | – | – | 0 (0 + 0) | 3/3 |
+| Ore mined | 10 | 55 | 65 | 65 (10 + 55) | 4/4 |
+| Trades completed / Exchange items sold | 1 | 3 | 4 trades | 4 / 19 | 4/4 |
+| Distance traveled (AU) | 1.3K (1,253) | 34 | 1,287 | 1,287 (1,253 + 34) | 3/3 |
+| Systems explored | **2** | **1** | **3** | **1** (1 + 0) | **3/3 public · 1.5/3 API** |
+| **Total** | | | | | **25/25 public · 23.5/25 API** |
 
-The last 1.5 marks were deliberately not pursued. A second explored system needs a jump of at least 326,
-which would push combined distance past 1,500 (losing 2 marks to gain 1.5).
+`python -m scripts.platform_score --earned 2466 --spent 0 --ore 65 --trades 4 --exchange-sales 19 --distance 1287 --systems 3`
+gives 25/25; with `--systems 1` it gives 23.5/25. The public profiles do not list Credits Spent or Exchange Items Sold
+(they show "Exchange Earnings"), so those two come from the API.
+
+**Discrepancy, documented as §4 of the assignment asks.** The public profile counts each pilot's home system
+(Haven) in *Systems Explored* (P1: Haven + Market Prime = 2; P2: Haven = 1). The API's `stats.systems_explored`
+counts only systems reached after the start (P1: 1, P2: 0). Every other counter agrees. We did not take a second
+jump to raise the API figure: a jump of at least 326 AU would push combined distance past 1,500 and cost 2 travel
+marks to gain 1.5.
 
 ```mermaid
 pie showData
-    title Platform marks earned (23.5 of 25)
+    title Platform marks on the public profiles (25 of 25)
     "Credits earned (8/8)" : 8
     "Ore mined (4/4)" : 4
     "Trade / exchange sale (4/4)" : 4
     "Controlled spending (3/3)" : 3
     "Travel efficiency (3/3)" : 3
-    "Systems explored (1.5/3)" : 1.5
-    "Not earned" : 1.5
+    "Systems explored (3/3)" : 3
 ```
 
 **Where the 2,466 credits came from.** Every credit came from a genuine exchange sale; no mission was
@@ -340,8 +365,15 @@ gantt
 
 ## 7. Limitations
 
-* Field names for some responses (missions, market) were not fully documented, so parsers are tolerant
-  and `scripts/live_check.py` prints a warning when the live server differs.
-* If the game does not expose a statistic in `get_status`, the coordinator cannot stop on it automatically;
-  use `--max-minutes` and check the public profiles.
-* Market depth is dynamic; if no station buys an ore, the trading agent skips it rather than dumping it.
+* **Text replies.** The live MCP v2 server answers most queries in human-readable text, not JSON.
+  `mas/text_formats.py` parses the formats we observed (status, system, POI, missions, market, cargo); a format
+  change on the server would need a parser update. `scripts/live_check.py` warns when parsing comes back empty.
+* **Shared rate limit.** The gateway allows 60 HTTP requests per minute per IP across both pilots. The shared
+  pacer keeps us under it, but it makes each cycle slower (observing both pilots takes about 30 s).
+* **Contested home belt.** Haven's only belt is drained by many class pilots, so mining yields depend on
+  timing. Credits came mostly from one well-timed station buy order (Trade Crystals at 272 cr), not missions.
+* **Distance budget.** Neighbouring systems are 326–514 AU away, so with 1,287 AU used no further jump fits
+  under 1,500. The validator therefore rejects exploration plans, and the coordinator stops after 3 idle cycles.
+* **Counter discrepancy.** The public profile and the API count *Systems Explored* differently (see §4).
+* **Not tested live.** The market-mission listing (`list_item`) rule is unit-tested and mock-tested, but the
+  LLM never chose it in a live run, so no live sell order was placed.
